@@ -7,6 +7,8 @@ mod logging;
 mod pages;
 mod runtime;
 mod services;
+mod theme;
+mod theming;
 
 use gpui::*;
 use assets::CombinedAssets;
@@ -65,6 +67,7 @@ fn main() {
 
     app.run(move |cx| {
         gpui_component::init(cx);
+        theming::load_bundled_themes(cx);
 
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(960.), px(680.)), cx)),
@@ -73,6 +76,10 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
+                // Apply the user's previously selected theme (if any) before
+                // building the root view, so the first paint is correct.
+                theming::apply_saved_theme_or_default(window, cx);
+
                 let view = cx.new(|cx| AppLayout::new(window, cx));
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))
             })

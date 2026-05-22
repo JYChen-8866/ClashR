@@ -13,8 +13,21 @@ use tracing::{info, warn};
 use crate::runtime::spawn_on_tokio;
 use crate::services::mihomo_api::{self, ProxyNode};
 
-fn active_color() -> Hsla {
-    hsla(0.73, 0.55, 0.6, 1.0)
+/// Theme-driven brand color (was: hard-coded `#7F60D3`).
+fn brand_color(cx: &App) -> Hsla {
+    cx.theme().primary
+}
+
+/// Themed primary-button variant: theme `primary` background, theme
+/// `primary_foreground` text, with hover/active a touch darker.
+fn primary_button_variant(cx: &App) -> gpui_component::button::ButtonCustomVariant {
+    use gpui_component::button::ButtonCustomVariant;
+    let primary = cx.theme().primary;
+    ButtonCustomVariant::new(cx)
+        .color(primary)
+        .foreground(cx.theme().primary_foreground)
+        .hover(Hsla { l: (primary.l - 0.08).max(0.0), ..primary })
+        .active(Hsla { l: (primary.l - 0.15).max(0.0), ..primary })
 }
 
 /// Pick a representative icon for a proxy group's policy.
@@ -230,7 +243,7 @@ impl ProxiesPage {
         page
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.loading = true;
         cx.notify();
 
@@ -411,12 +424,12 @@ impl ProxiesPage {
         let now = group.now.clone().unwrap_or_default();
 
         let bg = if is_selected {
-            active_color().opacity(0.1)
+            brand_color(cx).opacity(0.1)
         } else {
             cx.theme().transparent
         };
         let border = if is_selected {
-            active_color()
+            brand_color(cx)
         } else {
             cx.theme().transparent
         };
@@ -449,7 +462,7 @@ impl ProxiesPage {
                         &group.name,
                         icon_for_group(&group.kind),
                         if is_selected {
-                            active_color()
+                            brand_color(cx)
                         } else {
                             cx.theme().muted_foreground
                         },
@@ -507,7 +520,7 @@ impl ProxiesPage {
         let delay = node.as_ref().and_then(|n| n.last_delay());
 
         let border_color = if is_current {
-            active_color()
+            brand_color(cx)
         } else {
             cx.theme().border
         };
@@ -548,7 +561,7 @@ impl ProxiesPage {
                                 node_name,
                                 icon_for_node(&kind),
                                 if is_current {
-                                    active_color()
+                                    brand_color(cx)
                                 } else {
                                     cx.theme().muted_foreground
                                 },
@@ -564,7 +577,7 @@ impl ProxiesPage {
                                         FontWeight::NORMAL
                                     })
                                     .text_color(if is_current {
-                                        active_color()
+                                        brand_color(cx)
                                     } else {
                                         cx.theme().foreground
                                     })
@@ -600,18 +613,49 @@ impl ProxiesPage {
 
 impl Render for ProxiesPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Prepare top-bar Test button state from the currently selected group.
+        let selected_for_test: Option<(SharedString, bool)> = self
+            .selected_group
+            .as_ref()
+            .and_then(|name| self.groups.iter().find(|g| &g.name == name))
+            .map(|g| {
+                (
+                    SharedString::from(g.name.clone()),
+                    self.testing_groups.contains(&g.name),
+                )
+            });
+
         let header = h_flex()
             .justify_between()
             .items_center()
             .flex_shrink_0()
             .child(div().font_bold().text_lg().child("Proxies"))
             .child(
-                Button::new("refresh-proxies")
-                    .icon(IconName::Redo)
-                    .label("Refresh")
-                    .compact()
-                    .ghost()
-                    .on_click(cx.listener(|this, _ev, _w, cx| this.refresh(cx))),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .when_some(selected_for_test, |row, (group_name, is_testing)| {
+                        let group_for_test = group_name.to_string();
+                        row.child(
+                            Button::new(SharedString::from(format!("test-{}", group_name)))
+                                .icon(IconName::Loader)
+                                .label(if is_testing { "Testing…" } else { "Test" })
+                                .compact()
+                                .custom(primary_button_variant(cx))
+                                .loading(is_testing)
+                                .on_click(cx.listener(move |this, _ev, _w, cx| {
+                                    this.delay_test_group(group_for_test.clone(), cx);
+                                })),
+                        )
+                    })
+                    .child(
+                        Button::new("refresh-proxies")
+                            .icon(IconName::Redo)
+                            .label("Refresh")
+                            .compact()
+                            .custom(primary_button_variant(cx))
+                            .on_click(cx.listener(|this, _ev, _w, cx| this.refresh(cx))),
+                    ),
             );
 
         if self.groups.is_empty() {
@@ -619,6 +663,12 @@ impl Render for ProxiesPage {
                 .size_full()
                 .gap_4()
                 .child(header)
+                .child(
+                    div()
+                        .h(px(1.))
+                        .w_full()
+                        .bg(cx.theme().border),
+                )
                 .child(
                     v_flex()
                         .flex_1()
@@ -669,9 +719,6 @@ impl Render for ProxiesPage {
             let current = group.now.clone();
             let is_selectable = group.is_user_selectable();
 
-            let is_testing = self.testing_groups.contains(&group_name);
-            let group_for_test = group_name.clone();
-
             let header_row = h_flex()
                 .w_full()
                 .justify_between()
@@ -697,30 +744,14 @@ impl Render for ProxiesPage {
                                 )),
                         ),
                 )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .when(!is_selectable, |el| {
-                            el.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("auto-selected"),
-                            )
-                        })
-                        .child(
-                            Button::new(SharedString::from(format!("test-{}", group_name)))
-                                .icon(IconName::Loader)
-                                .label(if is_testing { "Testing…" } else { "Test" })
-                                .compact()
-                                .ghost()
-                                .loading(is_testing)
-                                .on_click(cx.listener(move |this, _ev, _w, cx| {
-                                    this.delay_test_group(group_for_test.clone(), cx);
-                                })),
-                        ),
-                );
+                .when(!is_selectable, |el| {
+                    el.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("auto-selected"),
+                    )
+                });
 
             let group_for_cards = group_name.clone();
             v_flex()
@@ -772,6 +803,12 @@ impl Render for ProxiesPage {
             .size_full()
             .gap_3()
             .child(header)
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(cx.theme().border),
+            )
             .child(
                 h_flex()
                     .flex_1()
