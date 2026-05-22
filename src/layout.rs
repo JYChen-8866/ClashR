@@ -182,16 +182,10 @@ impl Render for AppLayout {
                                 .items_center()
                                 .gap_2()
                                 .child(
-                                    div()
+                                    img("/Users/jychen/Downloads/ClashR/icons/app/xai-tmp-imgen-e974e7de-7e05-4816-989a-7883b9a342df.jpeg")
                                         .size_8()
                                         .flex_shrink_0()
-                                        .rounded(cx.theme().radius)
-                                        .bg(cx.theme().sidebar_primary)
-                                        .text_color(cx.theme().sidebar_primary_foreground)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(gpui_component::Icon::new(IconName::Globe)),
+                                        .rounded(cx.theme().radius),
                                 )
                                 .child(
                                     v_flex()
