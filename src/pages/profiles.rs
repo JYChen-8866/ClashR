@@ -51,8 +51,8 @@ const GRID_GAP: Pixels = px(16.);
 const CARD_MIN_WIDTH: Pixels = px(320.);
 const CARD_MAX_WIDTH: Pixels = px(400.);
 
-fn active_color() -> Hsla {
-    hsla(0.73, 0.55, 0.6, 1.0)
+fn brand_color(cx: &App) -> Hsla {
+    cx.theme().primary
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +115,17 @@ impl ProfilesPage {
                     let mgr = crate::core::CoreManager::global();
                     if mgr.activate_profile(&uid).is_ok() {
                         let _ = mgr.start().await;
+                    }
+                    // Re-apply the system proxy if the user had it on last
+                    // session. We do this *after* the core start attempt so
+                    // we don't point traffic at a dead port.
+                    if crate::theming::Preferences::load().system_proxy_enabled {
+                        if matches!(
+                            mgr.status().await,
+                            crate::core::CoreStatus::Running { .. }
+                        ) {
+                            let _ = crate::core::sysproxy::enable("127.0.0.1", 7890);
+                        }
                     }
                     anyhow::Ok(())
                 }).await;
@@ -422,13 +433,13 @@ impl ProfilesPage {
         let uid_delete = uid.clone();
 
         let border_color = if is_active {
-            active_color()
+            brand_color(cx)
         } else {
             cx.theme().border
         };
 
         let title_color = if is_active {
-            active_color()
+            brand_color(cx)
         } else {
             cx.theme().foreground
         };
@@ -495,7 +506,7 @@ impl ProfilesPage {
                                         .px_2()
                                         .py_0p5()
                                         .rounded_md()
-                                        .bg(active_color())
+                                        .bg(brand_color(cx))
                                         .text_color(gpui::white())
                                         .text_xs()
                                         .font_weight(FontWeight::MEDIUM)
@@ -593,12 +604,12 @@ impl ProfilesPage {
                                 .h(px(4.))
                                 .w_full()
                                 .rounded_full()
-                                .bg(active_color().opacity(0.18))
+                                .bg(brand_color(cx).opacity(0.18))
                                 .overflow_hidden()
                                 .child(
                                     div()
                                         .h_full()
-                                        .bg(active_color())
+                                        .bg(brand_color(cx))
                                         .w(relative(percent))
                                         .rounded_full(),
                                 ),
