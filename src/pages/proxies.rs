@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt as _, h_flex, v_flex,
+    ActiveTheme, Icon, IconName, StyledExt as _, VirtualListScrollHandle, h_flex, v_flex,
+    v_virtual_list,
     button::{Button, ButtonVariants as _},
 };
 use tracing::{info, warn};
@@ -250,6 +252,7 @@ pub struct ProxiesPage {
     loading: bool,
     /// Set of group names currently being tested.
     testing_groups: std::collections::HashSet<String>,
+    scroll_handle: VirtualListScrollHandle,
 }
 
 impl ProxiesPage {
@@ -260,6 +263,7 @@ impl ProxiesPage {
             selected_group: None,
             loading: false,
             testing_groups: std::collections::HashSet::new(),
+            scroll_handle: VirtualListScrollHandle::new(),
         };
         page.refresh(cx);
         page
@@ -526,7 +530,7 @@ impl ProxiesPage {
             )
     }
 
-    fn render_node_card(
+    fn render_node_item(
         &self,
         group: &str,
         node_name: &str,
@@ -541,23 +545,25 @@ impl ProxiesPage {
             .unwrap_or_else(|| "?".to_string());
         let delay = node.as_ref().and_then(|n| n.last_delay());
 
-        let border_color = if is_current {
-            brand_color(cx)
+        let bg_color = if is_current {
+            brand_color(cx).opacity(0.1)
         } else {
-            cx.theme().border
+            cx.theme().transparent
         };
 
         let group_owned = group.to_string();
         let node_owned = node_name.to_string();
 
-        v_flex()
+        h_flex()
             .id(SharedString::from(format!("node-{}-{}", group, node_name)))
-            .p_3()
-            .gap_2()
-            .rounded_md()
-            .border_1()
-            .border_color(border_color)
-            .bg(cx.theme().background)
+            .w_full()
+            .px_3()
+            .py_2()
+            .gap_3()
+            .items_center()
+            .bg(bg_color)
+            .border_b_1()
+            .border_color(cx.theme().border.opacity(0.5))
             .when(is_selectable, |el| {
                 el.cursor_pointer()
                     .when(!is_current, |el| {
@@ -569,67 +575,63 @@ impl ProxiesPage {
             })
             .child(
                 h_flex()
-                    .w_full()
-                    .justify_between()
-                    .items_center()
+                    .flex_1()
+                    .min_w_0()
                     .gap_2()
+                    .items_center()
+                    .child(Self::render_icon(
+                        node_name,
+                        icon_for_node(&kind),
+                        if is_current {
+                            brand_color(cx)
+                        } else {
+                            cx.theme().muted_foreground
+                        },
+                    ))
                     .child(
-                        h_flex()
+                        div()
                             .flex_1()
                             .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .child(Self::render_icon(
-                                node_name,
-                                icon_for_node(&kind),
-                                if is_current {
-                                    brand_color(cx)
-                                } else {
-                                    cx.theme().muted_foreground
-                                },
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_sm()
-                                    .font_weight(if is_current {
-                                        FontWeight::SEMIBOLD
-                                    } else {
-                                        FontWeight::NORMAL
-                                    })
-                                    .text_color(if is_current {
-                                        brand_color(cx)
-                                    } else {
-                                        cx.theme().foreground
-                                    })
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .child(node_name.to_string()),
-                            ),
-                    )
-                    .when_some(delay, |el, d| {
-                        let label = if d == 0 {
-                            "—".to_string()
-                        } else {
-                            format!("{} ms", d)
-                        };
-                        el.child(
-                            div()
-                                .text_xs()
-                                .text_color(Self::delay_color(d, cx))
-                                .flex_shrink_0()
-                                .child(label),
-                        )
-                    }),
+                            .text_sm()
+                            .font_weight(if is_current {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if is_current {
+                                brand_color(cx)
+                            } else {
+                                cx.theme().foreground
+                            })
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(node_name.to_string()),
+                    ),
             )
             .child(
                 div()
-                    .pl_5()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
+                    .flex_shrink_0()
+                    .w(px(80.))
                     .child(kind),
             )
+            .when_some(delay, |el, d| {
+                let label = if d == 0 {
+                    "—".to_string()
+                } else {
+                    format!("{} ms", d)
+                };
+                el.child(
+                    div()
+                        .text_xs()
+                        .text_color(Self::delay_color(d, cx))
+                        .flex_shrink_0()
+                        .w(px(60.))
+                        .text_right()
+                        .child(label),
+                )
+            })
     }
 }
 
@@ -776,6 +778,44 @@ impl Render for ProxiesPage {
                 });
 
             let group_for_cards = group_name.clone();
+            let nodes = group.all.clone();
+            let item_count = nodes.len();
+            let item_sizes = Rc::new(vec![size(px(100.), px(36.)); item_count]);
+
+            let entity = cx.entity().clone();
+            let nodes_list = v_virtual_list(
+                entity,
+                "proxies-virtual-list",
+                item_sizes,
+                move |this, range, _window, cx| {
+                    let group = this
+                        .groups
+                        .iter()
+                        .find(|g| g.name == group_for_cards)
+                        .cloned();
+                    if let Some(g) = group {
+                        let current = g.now.clone();
+                        let is_selectable = g.is_user_selectable();
+                        range
+                            .map(|i| {
+                                let name = &g.all[i];
+                                let is_current = current.as_deref() == Some(name.as_str());
+                                this.render_node_item(
+                                    &group_for_cards,
+                                    name,
+                                    is_current,
+                                    is_selectable,
+                                    cx,
+                                )
+                            })
+                            .collect()
+                    } else {
+                        vec![]
+                    }
+                },
+            )
+            .track_scroll(&self.scroll_handle);
+
             v_flex()
                 .flex_1()
                 .h_full()
@@ -783,33 +823,7 @@ impl Render for ProxiesPage {
                 .pl_4()
                 .gap_2()
                 .child(header_row)
-                .child(
-                    div()
-                        .id("nodes-list")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .gap_2()
-                                .children(group.all.iter().map(|name| {
-                                    let is_current = current.as_deref() == Some(name.as_str());
-                                    div()
-                                        .flex_basis(px(220.))
-                                        .flex_grow()
-                                        .max_w(px(280.))
-                                        .child(self.render_node_card(
-                                            &group_for_cards,
-                                            name,
-                                            is_current,
-                                            is_selectable,
-                                            cx,
-                                        ))
-                                })),
-                        ),
-                )
+                .child(nodes_list)
                 .into_any_element()
         } else {
             div()
