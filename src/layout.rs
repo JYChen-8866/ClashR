@@ -5,7 +5,7 @@ use gpui_component::{
 };
 
 use crate::core::{CoreManager, CoreStatus};
-use crate::pages::{ProfilesPage, ProxiesPage, SettingsPage};
+use crate::pages::{HomePage, ProfilesPage, ProxiesPage, SettingsPage};
 use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,6 +59,7 @@ impl Page {
 
 pub struct AppLayout {
     current_page: Page,
+    home_page: Entity<HomePage>,
     profiles_page: Entity<ProfilesPage>,
     proxies_page: Entity<ProxiesPage>,
     settings_page: Entity<SettingsPage>,
@@ -67,6 +68,7 @@ pub struct AppLayout {
 
 impl AppLayout {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let home_page = cx.new(|cx| HomePage::new(window, cx));
         let profiles_page = cx.new(|cx| ProfilesPage::new(window, cx));
         let proxies_page = cx.new(|cx| ProxiesPage::new(window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
@@ -102,6 +104,7 @@ impl AppLayout {
 
         Self {
             current_page: Page::Home,
+            home_page,
             profiles_page,
             proxies_page,
             settings_page,
@@ -132,7 +135,16 @@ impl Render for AppLayout {
                     .icon(p.icon())
                     .active(current == p)
                     .on_click(cx.listener(move |this, _event, _window, cx| {
+                        let was = this.current_page;
                         this.current_page = p;
+                        // Refresh dynamic pages when entering them so stale
+                        // state (proxy list after profile switch, etc.) is
+                        // reconciled with mihomo's runtime view.
+                        if p == Page::Proxies && was != Page::Proxies {
+                            this.proxies_page.update(cx, |page, cx| {
+                                page.refresh(cx);
+                            });
+                        }
                         cx.notify();
                     }))
             })
@@ -225,7 +237,7 @@ impl Render for AppLayout {
                                 Page::Profiles => div().size_full().child(self.profiles_page.clone()),
                                 Page::Proxies => div().size_full().child(self.proxies_page.clone()),
                                 Page::Settings => div().size_full().child(self.settings_page.clone()),
-                                Page::Home => div().child("Home - Traffic stats, proxy mode, system proxy controls"),
+                                Page::Home => div().size_full().child(self.home_page.clone()),
                                 Page::Connections => div().child("Connections - Active connection list"),
                                 Page::Rules => div().child("Rules - Routing rules"),
                                 Page::Logs => div().child("Logs - Real-time log stream"),
