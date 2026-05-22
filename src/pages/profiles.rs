@@ -4,7 +4,6 @@ use gpui_component::{
     ActiveTheme, IconName, StyledExt as _, h_flex, v_flex, Root, WindowExt as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
-    switch::Switch,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -47,7 +46,6 @@ pub struct ProfilesPage {
     desc_input: Entity<InputState>,
     edit_url_input: Entity<InputState>,
     edit_desc_input: Entity<InputState>,
-    use_proxy: bool,
 }
 
 impl ProfilesPage {
@@ -76,7 +74,6 @@ impl ProfilesPage {
             desc_input,
             edit_url_input,
             edit_desc_input,
-            use_proxy: false,
         }
     }
 
@@ -122,9 +119,8 @@ impl ProfilesPage {
 
         let uid = format!("R{:08x}", rand_u32());
         let name = desc.clone().unwrap_or_else(|| extract_name_from_url(&url));
-        let use_proxy = self.use_proxy;
 
-        info!(uid = %uid, name = %name, use_proxy, "importing profile");
+        info!(uid = %uid, name = %name, "importing profile");
 
         let profile = ProfileItem {
             uid: uid.clone(),
@@ -144,16 +140,13 @@ impl ProfilesPage {
 
         cx.spawn(async move |entity, cx| {
             let result = spawn_on_tokio(async move {
-                if use_proxy {
-                    subscription::fetch_subscription(&url, 7890).await
-                } else {
-                    subscription::fetch_subscription_direct(&url).await
-                }
+                subscription::fetch_subscription_direct(&url).await
             }).await;
 
             cx.update(|cx| {
                 if let Some(entity) = entity.upgrade() {
                     entity.update(cx, |this, cx| {
+                        let is_current = this.current_uid.as_deref() == Some(&uid);
                         if let Some(profile) = this.profiles.iter_mut().find(|p| p.uid == uid) {
                             match result {
                                 Ok(fetch_result) => {
@@ -172,6 +165,30 @@ impl ProfilesPage {
                                         });
                                     }
                                     profile.updated = Some(now_timestamp());
+
+                                    // Persist body to disk for the core to consume.
+                                    let mgr = crate::core::CoreManager::global();
+                                    if let Err(e) = mgr.save_profile(&profile.uid, &fetch_result.body) {
+                                        warn!(uid = %profile.uid, error = %e, "failed to save profile body");
+                                    } else if is_current {
+                                        // If this is the active profile, activate
+                                        // and (re)start the core automatically.
+                                        let uid_for_core = profile.uid.clone();
+                                        cx.spawn(async move |_entity, _cx| {
+                                            let _ = spawn_on_tokio(async move {
+                                                mgr.activate_profile(&uid_for_core)?;
+                                                match mgr.status().await {
+                                                    crate::core::CoreStatus::Stopped | crate::core::CoreStatus::Failed { .. } => {
+                                                        mgr.start().await?;
+                                                    }
+                                                    _ => {
+                                                        mgr.restart().await?;
+                                                    }
+                                                }
+                                                anyhow::Ok(())
+                                            }).await;
+                                        }).detach();
+                                    }
                                 }
                                 Err(e) => {
                                     warn!(uid = %profile.uid, error = %e, "profile fetch failed");
@@ -187,8 +204,25 @@ impl ProfilesPage {
     }
 
     fn select_profile(&mut self, uid: String, _window: &mut Window, cx: &mut Context<Self>) {
-        self.current_uid = Some(uid);
+        if self.current_uid.as_deref() == Some(&uid) {
+            return;
+        }
+        self.current_uid = Some(uid.clone());
         cx.notify();
+
+        // Activate the runtime config and hot-reload via mihomo API.
+        // If core isn't running yet, it will be started.
+        cx.spawn(async move |_entity, _cx| {
+            let result = spawn_on_tokio(async move {
+                let mgr = crate::core::CoreManager::global();
+                mgr.activate_profile(&uid)?;
+                mgr.reload_config().await
+            }).await;
+
+            if let Err(e) = result {
+                warn!(error = %e, "failed to switch profile");
+            }
+        }).detach();
     }
 
     fn edit_profile(&mut self, uid: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -275,14 +309,9 @@ impl ProfilesPage {
         info!(uid = %uid, "updating profile");
 
         let uid_clone = uid.clone();
-        let use_proxy = self.use_proxy;
         cx.spawn(async move |entity, cx| {
             let result = spawn_on_tokio(async move {
-                if use_proxy {
-                    subscription::fetch_subscription(&url, 7890).await
-                } else {
-                    subscription::fetch_subscription_direct(&url).await
-                }
+                subscription::fetch_subscription_direct(&url).await
             }).await;
 
             cx.update(|cx| {
@@ -526,16 +555,6 @@ impl Render for ProfilesPage {
                     .child(div().font_bold().text_lg().child("Profiles"))
                     .child(
                         h_flex().gap_3().items_center()
-                            .child(
-                                Switch::new("use-proxy-switch")
-                                    .checked(self.use_proxy)
-                                    .label("Via proxy")
-                                    .color(active_color())
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        this.use_proxy = *checked;
-                                        cx.notify();
-                                    })),
-                            )
                             .child(
                                 Button::new("import-btn")
                                     .label("Import")

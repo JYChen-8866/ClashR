@@ -1,7 +1,12 @@
 use gpui::*;
-use gpui_component::{ActiveTheme, IconName, StyledExt as _, h_flex, v_flex, sidebar::*};
+use gpui::prelude::FluentBuilder as _;
+use gpui_component::{
+    ActiveTheme, IconName, StyledExt as _, h_flex, v_flex, sidebar::*,
+};
 
-use crate::pages::ProfilesPage;
+use crate::core::{CoreManager, CoreStatus};
+use crate::pages::{ProfilesPage, SettingsPage};
+use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -55,14 +60,59 @@ impl Page {
 pub struct AppLayout {
     current_page: Page,
     profiles_page: Entity<ProfilesPage>,
+    settings_page: Entity<SettingsPage>,
+    core_status: CoreStatus,
 }
 
 impl AppLayout {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let profiles_page = cx.new(|cx| ProfilesPage::new(window, cx));
+        let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
+
+        // Poll core status periodically so the indicator stays in sync.
+        cx.spawn(async move |entity, cx| {
+            loop {
+                let status = spawn_on_tokio(async {
+                    CoreManager::global().status().await
+                }).await;
+
+                let updated = cx.update(|cx| {
+                    if let Some(entity) = entity.upgrade() {
+                        entity.update(cx, |this: &mut AppLayout, cx| {
+                            if this.core_status != status {
+                                this.core_status = status;
+                                cx.notify();
+                            }
+                        });
+                        true
+                    } else {
+                        false
+                    }
+                });
+
+                if !updated {
+                    break;
+                }
+
+                cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+            }
+        }).detach();
+
         Self {
             current_page: Page::Home,
             profiles_page,
+            settings_page,
+            core_status: CoreStatus::Stopped,
+        }
+    }
+
+    fn status_label(&self) -> (&'static str, Hsla) {
+        match &self.core_status {
+            CoreStatus::Stopped => ("Stopped", hsla(0.0, 0.0, 0.6, 1.0)),
+            CoreStatus::Starting => ("Starting…", hsla(0.12, 0.7, 0.5, 1.0)),
+            CoreStatus::Running { .. } => ("Running", hsla(0.32, 0.6, 0.45, 1.0)),
+            CoreStatus::Stopping => ("Stopping…", hsla(0.12, 0.7, 0.5, 1.0)),
+            CoreStatus::Failed { .. } => ("Failed", hsla(0.0, 0.7, 0.5, 1.0)),
         }
     }
 }
@@ -129,11 +179,30 @@ impl Render for AppLayout {
                     .footer(
                         SidebarFooter::new().child(
                             h_flex()
-                                .gap_2()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("0 B/s ↑")
-                                .child("0 B/s ↓"),
+                                .w_full()
+                                .justify_between()
+                                .items_center()
+                                .child({
+                                    let (label, color) = self.status_label();
+                                    h_flex()
+                                        .gap_1p5()
+                                        .items_center()
+                                        .child(div().size(px(7.)).rounded_full().bg(color))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(label),
+                                        )
+                                })
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("0 B/s ↑")
+                                        .child("0 B/s ↓"),
+                                ),
                         ),
                     ),
             )
@@ -142,17 +211,24 @@ impl Render for AppLayout {
                     .flex_1()
                     .h_full()
                     .min_w_0()
-                    .p_4()
                     .overflow_hidden()
-                    .child(match current {
-                        Page::Profiles => div().size_full().child(self.profiles_page.clone()),
-                        Page::Home => div().child("Home - Traffic stats, proxy mode, system proxy controls"),
-                        Page::Proxies => div().child("Proxies - Proxy groups and node selection"),
-                        Page::Connections => div().child("Connections - Active connection list"),
-                        Page::Rules => div().child("Rules - Routing rules"),
-                        Page::Logs => div().child("Logs - Real-time log stream"),
-                        Page::Settings => div().child("Settings - App configuration"),
-                    }),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .p_4()
+                            .overflow_hidden()
+                            .child(match current {
+                                Page::Profiles => div().size_full().child(self.profiles_page.clone()),
+                                Page::Settings => div().size_full().child(self.settings_page.clone()),
+                                Page::Home => div().child("Home - Traffic stats, proxy mode, system proxy controls"),
+                                Page::Proxies => div().child("Proxies - Proxy groups and node selection"),
+                                Page::Connections => div().child("Connections - Active connection list"),
+                                Page::Rules => div().child("Rules - Routing rules"),
+                                Page::Logs => div().child("Logs - Real-time log stream"),
+                            }),
+                    ),
             )
     }
 }
+

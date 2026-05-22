@@ -1,5 +1,6 @@
 mod app;
 mod components;
+mod core;
 mod layout;
 mod logging;
 mod pages;
