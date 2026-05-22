@@ -159,50 +159,22 @@ impl Render for AppLayout {
             })
             .collect();
 
-        // In fullscreen, macOS hides the traffic lights, leaving the
-        // TitleBar's 80px left padding as wasted space. Pull our content
-        // back into that area with a negative left margin.
-        let fullscreen = window.is_fullscreen();
-
-        let title_bar = TitleBar::new().child(
-            h_flex()
-                .w_full()
-                .px_2()
-                .gap_2()
-                .items_center()
-                .when(fullscreen, |this| this.ml(-px(80.)))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().foreground)
-                        .child("ClashR"),
-                )
-                .child({
-                    let (label, color) = self.status_label();
-                    h_flex()
-                        .gap_1p5()
-                        .items_center()
-                        .child(div().size(px(6.)).rounded_full().bg(color))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(label),
-                        )
-                }),
-        );
-
-        let body = h_flex()
+        // Two-column layout: sidebar + content
+        h_flex()
             .size_full()
             .bg(cx.theme().background)
             .child(
-                Sidebar::new("main-sidebar")
-                    .collapsible(SidebarCollapsible::Icon)
-                    .collapsed(false)
-                    .w(px(200.))
-                    .header(
-                        SidebarHeader::new().child(
+                // Left: sidebar with top padding for macOS traffic lights
+                div()
+                    .h_full()  // Full height
+                    .pt(px(28.))  // Space for macOS traffic lights
+                    .child(
+                        Sidebar::new("main-sidebar")
+                            .collapsible(SidebarCollapsible::Icon)
+                            .collapsed(false)
+                            .w(px(200.))
+                            .header(
+                                SidebarHeader::new().child(
                             h_flex()
                                 .items_center()
                                 .gap_2()
@@ -269,35 +241,26 @@ impl Render for AppLayout {
                                 }),
                         ),
                     ),
+                ),
             )
             .child(
-                v_flex()
+                // Right: main content
+                div()
                     .flex_1()
                     .h_full()
                     .min_w_0()
+                    .p_4()
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .p_4()
-                            .overflow_hidden()
-                            .child(match current {
-                                Page::Profiles => div().size_full().child(self.profiles_page.clone()),
-                                Page::Proxies => div().size_full().child(self.proxies_page.clone()),
-                                Page::Settings => div().size_full().child(self.settings_page.clone()),
-                                Page::Home => div().size_full().child(self.home_page.clone()),
-                                Page::Connections => div().size_full().child(self.connections_page.clone()),
-                                Page::Rules => div().size_full().child(self.rules_page.clone()),
-                                Page::Logs => div().size_full().child(self.logs_page.clone()),
-                            }),
-                    ),
-            );
-
-        v_flex()
-            .size_full()
-            .child(title_bar)
-            .child(body)
+                    .child(match current {
+                        Page::Profiles => div().size_full().child(self.profiles_page.clone()),
+                        Page::Proxies => div().size_full().child(self.proxies_page.clone()),
+                        Page::Settings => div().size_full().child(self.settings_page.clone()),
+                        Page::Home => div().size_full().child(self.home_page.clone()),
+                        Page::Connections => div().size_full().child(self.connections_page.clone()),
+                        Page::Rules => div().size_full().child(self.rules_page.clone()),
+                        Page::Logs => div().size_full().child(self.logs_page.clone()),
+                    }),
+            )
     }
 }
 
