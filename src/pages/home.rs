@@ -23,16 +23,21 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     chart::AreaChart,
     popover::Popover,
+    switch::Switch,
 };
 use serde::Deserialize;
 use tracing::{info, warn};
 
+use crate::core::sysproxy;
 use crate::runtime::spawn_on_tokio;
+use crate::theming::Preferences;
 
 const TRAFFIC_SAMPLE_LIMIT: usize = 600; // 10 min at 1 Hz
 const POLL_INTERVAL_MS: u64 = 1000;
 const PROXY_URL: &str = "http://127.0.0.1:7890";
 const MIHOMO_BASE: &str = "http://127.0.0.1:9090";
+const SYS_PROXY_HOST: &str = "127.0.0.1";
+const SYS_PROXY_PORT: u16 = 7890;
 
 #[derive(Clone, Copy, Default)]
 struct TrafficSample {
@@ -95,6 +100,8 @@ pub struct HomePage {
     mode: Option<String>,
     global_now: Option<String>,
     global_all: Vec<String>,
+    tun_enabled: bool,
+    system_proxy_on: bool,
 
     sites: Vec<SiteTest>,
     ip_state: IpState,
@@ -120,10 +127,11 @@ impl HomePage {
                     if let Some(entity) = entity.upgrade() {
                         entity.update(cx, |this: &mut HomePage, cx| {
                             this.ingest_stats(stats);
-                            if let Ok((mode, now, all)) = mode_global {
+                            if let Ok((mode, now, all, tun)) = mode_global {
                                 this.mode = Some(mode);
                                 this.global_now = now;
                                 this.global_all = all;
+                                this.tun_enabled = tun;
                             }
                             cx.notify();
                         });
@@ -174,6 +182,8 @@ impl HomePage {
             mode: None,
             global_now: None,
             global_all: Vec::new(),
+            tun_enabled: false,
+            system_proxy_on: Preferences::load().system_proxy_enabled,
             sites,
             ip_state: IpState::Loading,
             show_ip: false,
@@ -295,6 +305,68 @@ impl HomePage {
         .detach();
     }
 
+    fn toggle_system_proxy(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.system_proxy_on = on;
+        let prefs = Preferences {
+            system_proxy_enabled: on,
+            ..Preferences::load()
+        };
+        prefs.save();
+        cx.notify();
+
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_e, cx| {
+            let result = spawn_on_tokio(async move {
+                if on {
+                    sysproxy::enable(SYS_PROXY_HOST, SYS_PROXY_PORT)
+                } else {
+                    sysproxy::disable()
+                }
+            })
+            .await;
+
+            if let Err(e) = result {
+                warn!(error = %e, on, "system proxy toggle failed");
+                let _ = cx.update(|cx| {
+                    if let Some(entity) = entity.upgrade() {
+                        entity.update(cx, |this, cx| {
+                            this.system_proxy_on = !on;
+                            let prefs = Preferences {
+                                system_proxy_enabled: !on,
+                                ..Preferences::load()
+                            };
+                            prefs.save();
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn toggle_tun(&mut self, on: bool, cx: &mut Context<Self>) {
+        info!(on, "toggling TUN mode");
+        self.tun_enabled = on;
+        cx.notify();
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_e, cx| {
+            let result = spawn_on_tokio(async move { patch_tun(on).await }).await;
+            if let Err(e) = result {
+                warn!(error = %e, "TUN toggle failed; reconciling on next poll");
+                let _ = cx.update(|cx| {
+                    if let Some(entity) = entity.upgrade() {
+                        entity.update(cx, |this, cx| {
+                            this.tun_enabled = !on;
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     fn run_site_test(&mut self, idx: usize, cx: &mut Context<Self>) {
         if idx >= self.sites.len() {
             return;
@@ -326,12 +398,18 @@ impl HomePage {
 
 impl Render for HomePage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let top_row = h_flex()
+            .gap_4()
+            .items_stretch()
+            .child(div().flex_1().child(self.mode_section(cx)))
+            .child(div().flex_1().child(self.network_section(cx)));
+
         v_flex()
             .id("home-scroll")
             .size_full()
             .gap_4()
             .overflow_y_scroll()
-            .child(self.mode_section(cx))
+            .child(top_row)
             .child(self.traffic_section(cx))
             .child(self.sites_section(cx))
             .child(self.ip_section(cx))
@@ -390,6 +468,65 @@ impl HomePage {
         };
 
         section_card(cx, "代理模式", body)
+    }
+
+    fn network_section(&self, cx: &Context<Self>) -> impl IntoElement {
+        let row = |label: &'static str, hint: String, on: bool, key: &'static str| {
+            let switch_id = SharedString::from(format!("net-{}", key));
+            h_flex()
+                .w_full()
+                .justify_between()
+                .items_center()
+                .gap_3()
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(label.to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(hint),
+                        ),
+                )
+                .child(
+                    Switch::new(switch_id)
+                        .checked(on)
+                        .on_click(cx.listener(move |this, checked: &bool, w, cx| {
+                            match key {
+                                "sysproxy" => this.toggle_system_proxy(*checked, cx),
+                                "tun" => this.toggle_tun(*checked, cx),
+                                _ => {}
+                            }
+                            let _ = w;
+                        })),
+                )
+        };
+
+        let sysproxy_hint = if self.system_proxy_on {
+            format!("HTTP/HTTPS/SOCKS → {}:{}", SYS_PROXY_HOST, SYS_PROXY_PORT)
+        } else {
+            "Off — apps won't go through mihomo".to_string()
+        };
+        let tun_hint = if self.tun_enabled {
+            "On — all system traffic via TUN".to_string()
+        } else {
+            "Off — needs admin privilege to enable".to_string()
+        };
+
+        let body = v_flex()
+            .gap_3()
+            .child(row("系统代理", sysproxy_hint, self.system_proxy_on, "sysproxy"))
+            .child(div().h(px(1.)).bg(cx.theme().border))
+            .child(row("虚拟网卡 (TUN)", tun_hint, self.tun_enabled, "tun"))
+            .into_any_element();
+
+        section_card(cx, "网络设置", body)
     }
 
     fn global_node_picker(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -1016,12 +1153,20 @@ async fn fetch_ip_info() -> anyhow::Result<IpInfo> {
     Ok(info)
 }
 
-/// Fetch the current proxy mode (`rule|global|direct`) plus the GLOBAL
-/// group's `now` and `all` list. Returns `(mode, global_now, global_all)`.
-async fn fetch_mode_and_global() -> anyhow::Result<(String, Option<String>, Vec<String>)> {
+/// Fetch the current proxy mode (`rule|global|direct`), the GLOBAL group's
+/// `now` and `all` list, and the TUN enable flag. Returns
+/// `(mode, global_now, global_all, tun_enabled)`.
+async fn fetch_mode_and_global() -> anyhow::Result<(String, Option<String>, Vec<String>, bool)> {
+    #[derive(Deserialize)]
+    struct Tun {
+        #[serde(default)]
+        enable: bool,
+    }
     #[derive(Deserialize)]
     struct Cfg {
         mode: String,
+        #[serde(default)]
+        tun: Option<Tun>,
     }
     #[derive(Deserialize)]
     struct GlobalGroup {
@@ -1042,6 +1187,7 @@ async fn fetch_mode_and_global() -> anyhow::Result<(String, Option<String>, Vec<
     );
 
     let cfg: Cfg = cfg_res?.json().await?;
+    let tun_enabled = cfg.tun.map(|t| t.enable).unwrap_or(false);
     let (now, all) = match global_res {
         Ok(r) if r.status().is_success() => {
             let g: GlobalGroup = r.json().await?;
@@ -1050,7 +1196,7 @@ async fn fetch_mode_and_global() -> anyhow::Result<(String, Option<String>, Vec<
         _ => (None, Vec::new()),
     };
 
-    Ok((cfg.mode, now, all))
+    Ok((cfg.mode, now, all, tun_enabled))
 }
 
 async fn patch_mode(mode: &str) -> anyhow::Result<()> {
@@ -1081,6 +1227,24 @@ async fn put_global_node(name: &str) -> anyhow::Result<()> {
         .await?;
     if !resp.status().is_success() {
         anyhow::bail!("HTTP {}", resp.status());
+    }
+    Ok(())
+}
+
+async fn patch_tun(enable: bool) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(3))
+        .build()?;
+    let resp = client
+        .patch(format!("{}/configs", MIHOMO_BASE))
+        .json(&serde_json::json!({ "tun": { "enable": enable } }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("HTTP {} — {}", status, body);
     }
     Ok(())
 }

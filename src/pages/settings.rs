@@ -130,6 +130,59 @@ impl SettingsPage {
         prefs.save();
         cx.notify();
     }
+
+    fn install_helper(&mut self, cx: &mut Context<Self>) {
+        info!("user requested helper service install");
+        cx.spawn(async move |entity, cx| {
+            let result = spawn_on_tokio(async {
+                tokio::task::spawn_blocking(|| {
+                    crate::core::service_install::install_with_admin_prompt()
+                })
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("join error: {e}")))
+            })
+            .await;
+
+            if let Err(e) = result {
+                warn!(error = %e, "helper install failed");
+            } else {
+                info!("helper install ok");
+            }
+            // Re-render so the section reflects the new state.
+            let _ = cx.update(|cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |_this, cx| cx.notify());
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn uninstall_helper(&mut self, cx: &mut Context<Self>) {
+        info!("user requested helper service uninstall");
+        cx.spawn(async move |entity, cx| {
+            let result = spawn_on_tokio(async {
+                tokio::task::spawn_blocking(|| {
+                    crate::core::service_install::uninstall_with_admin_prompt()
+                })
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("join error: {e}")))
+            })
+            .await;
+
+            if let Err(e) = result {
+                warn!(error = %e, "helper uninstall failed");
+            } else {
+                info!("helper uninstall ok");
+            }
+            let _ = cx.update(|cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |_this, cx| cx.notify());
+                }
+            });
+        })
+        .detach();
+    }
 }
 
 impl Render for SettingsPage {
@@ -140,6 +193,7 @@ impl Render for SettingsPage {
             .child(div().font_bold().text_lg().child("Settings"))
             .child(self.appearance_section(cx))
             .child(self.system_proxy_section(cx))
+            .child(self.helper_service_section(cx))
             .child(self.section(
                 "Clash Core",
                 "Manually control the mihomo subprocess. Normally not needed — the core starts and restarts automatically when you select a profile.",
@@ -296,6 +350,58 @@ impl SettingsPage {
         self.section(
             "System Proxy",
             "Send your Mac's HTTP, HTTPS, and SOCKS traffic through mihomo so apps and browsers go through the proxy. Requires the core to be running.",
+            cx,
+            body,
+        )
+    }
+
+    fn helper_service_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let installed = crate::core::service_install::is_service_installed();
+        let running = crate::core::service_install::is_service_running();
+
+        let (label, color) = match (installed, running) {
+            (true, true) => ("Installed and running", cx.theme().accent),
+            (true, false) => ("Installed but not running", cx.theme().muted_foreground),
+            (false, _) => ("Not installed", cx.theme().muted_foreground),
+        };
+
+        let buttons = if installed {
+            h_flex().gap_2().child(
+                Button::new("svc-uninstall")
+                    .label("Uninstall Helper")
+                    .compact()
+                    .ghost()
+                    .on_click(cx.listener(|this, _e, _w, cx| this.uninstall_helper(cx))),
+            )
+        } else {
+            h_flex().gap_2().child(
+                Button::new("svc-install")
+                    .label("Install Helper")
+                    .compact()
+                    .on_click(cx.listener(|this, _e, _w, cx| this.install_helper(cx))),
+            )
+        };
+
+        let body = v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().size(px(7.)).rounded_full().bg(color))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(label.to_string()),
+                    ),
+            )
+            .child(buttons)
+            .into_any_element();
+
+        self.section(
+            "Helper Service",
+            "A small root-privileged daemon that launches mihomo. Required for TUN mode (which creates a virtual network adapter and needs admin rights). Installs to /Library/LaunchDaemons and survives reboots.",
             cx,
             body,
         )

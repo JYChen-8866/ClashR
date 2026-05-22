@@ -94,6 +94,24 @@ impl CoreManager {
             set_if_missing(map, "mode", serde_yaml::Value::String("rule".into()));
             set_if_missing(map, "log-level", serde_yaml::Value::String("info".into()));
             set_if_missing(map, "allow-lan", serde_yaml::Value::Bool(false));
+
+            // Default TUN block — disabled at start. The Home page's TUN
+            // toggle flips `enable` via mihomo's external controller, so
+            // these defaults define the *shape* of TUN (stack, DNS hijack,
+            // routing) for when it's switched on.
+            let tun_key = serde_yaml::Value::String("tun".into());
+            if !map.contains_key(&tun_key) {
+                let mut tun = serde_yaml::Mapping::new();
+                tun.insert(serde_yaml::Value::String("enable".into()), serde_yaml::Value::Bool(false));
+                tun.insert(serde_yaml::Value::String("stack".into()), serde_yaml::Value::String("gvisor".into()));
+                tun.insert(
+                    serde_yaml::Value::String("dns-hijack".into()),
+                    serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".into())]),
+                );
+                tun.insert(serde_yaml::Value::String("auto-route".into()), serde_yaml::Value::Bool(true));
+                tun.insert(serde_yaml::Value::String("auto-detect-interface".into()), serde_yaml::Value::Bool(true));
+                map.insert(tun_key, serde_yaml::Value::Mapping(tun));
+            }
         }
 
         let dst = paths::runtime_yaml_path();
@@ -105,7 +123,122 @@ impl CoreManager {
 
     /// Start mihomo with the current `runtime.yaml`. Errors if no runtime
     /// config has been activated yet, or if the binary can't be located.
+    ///
+    /// Routing: if the clashr-service daemon socket is present we delegate
+    /// the spawn there (mihomo runs as root, TUN works). Otherwise we
+    /// fall back to spawning mihomo as the current user.
     pub async fn start(&self) -> Result<()> {
+        if crate::services::service_client::is_socket_present() {
+            return self.start_via_service().await;
+        }
+        self.start_directly().await
+    }
+
+    async fn start_via_service(&self) -> Result<()> {
+        // Defensive cleanup: if the app previously direct-spawned mihomo
+        // (e.g. before the daemon was installed), kill that child before
+        // asking the daemon to start its own — otherwise we'd have two
+        // mihomos fighting over port 7890.
+        let stale = {
+            let mut inner = self.inner.lock().await;
+            inner.process.take()
+        };
+        if let Some(proc) = stale {
+            warn!("found stale local mihomo, killing before delegating to service");
+            let _ = spawn_on_tokio(async move { proc.stop().await }).await;
+        }
+
+        let mut inner = self.inner.lock().await;
+        if matches!(inner.status, CoreStatus::Running { .. } | CoreStatus::Starting) {
+            // Reset; we just killed the stale child above (or there was
+            // never one). Anything previously running on the daemon side
+            // will be replaced by the new StartCore call.
+            inner.status = CoreStatus::Stopped;
+        }
+        inner.status = CoreStatus::Starting;
+        drop(inner);
+
+        let binary = paths::locate_mihomo().ok_or_else(|| {
+            anyhow!("mihomo binary not found. Set MIHOMO_PATH env var, place ./mihomo next to ClashR, or install mihomo on PATH")
+        })?;
+        let config = paths::runtime_yaml_path();
+
+        let bin_str = binary.to_string_lossy().into_owned();
+
+        // macOS TCC blocks root from reading ~/Downloads (and other
+        // user-protected dirs). Copy runtime.yaml to a shared temp
+        // location that the root-owned daemon can access.
+        let shared_dir = std::path::PathBuf::from("/tmp/clashr");
+        std::fs::create_dir_all(&shared_dir)?;
+        let shared_config = shared_dir.join("runtime.yaml");
+        std::fs::copy(&config, &shared_config).map_err(|e| {
+            anyhow!(
+                "copy {} -> {}: {}",
+                config.display(),
+                shared_config.display(),
+                e
+            )
+        })?;
+
+        // Also copy geodata (*.mmdb, *.dat, *.metadb) so mihomo doesn't
+        // re-download them on every restart. These can be 5-10 MB each.
+        // Look in our own data dir first, then fall back to Clash Verge's
+        // data dir (which likely already has them downloaded).
+        let data_dir = paths::data_dir();
+        let fallback_dir = dirs_next::data_dir()
+            .map(|d| d.join("io.github.clash-verge-rev.clash-verge-rev"));
+        let geo_sources: Vec<std::path::PathBuf> = [Some(data_dir.clone()), fallback_dir]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let geo_exts = ["mmdb", "dat", "metadb"];
+        for src_dir in &geo_sources {
+            if let Ok(entries) = std::fs::read_dir(src_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if geo_exts.contains(&ext) {
+                            if let Some(name) = path.file_name() {
+                                let dst = shared_dir.join(name);
+                                if !dst.exists() {
+                                    let _ = std::fs::copy(&path, &dst);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let cfg_str = shared_config.to_string_lossy().into_owned();
+
+        // Use RestartCore so a previous daemon-owned mihomo (if any) is
+        // killed first — keeps `start()` idempotent on the daemon path.
+        let bin_clone = bin_str.clone();
+        let cfg_clone = cfg_str.clone();
+        let result = spawn_on_tokio(async move {
+            crate::services::service_client::restart_core(bin_clone, cfg_clone).await
+        })
+        .await;
+
+        let mut inner = self.inner.lock().await;
+        match result {
+            Ok(state) => {
+                inner.status = ipc_state_to_status(state);
+                info!(?inner.status, "core started via service");
+                Ok(())
+            }
+            Err(e) => {
+                let reason = format!("{:#}", e);
+                warn!(error = %reason, "core start via service failed");
+                inner.status = CoreStatus::Failed { reason };
+                Err(e)
+            }
+        }
+    }
+
+    async fn start_directly(&self) -> Result<()> {
         let mut inner = self.inner.lock().await;
 
         if matches!(inner.status, CoreStatus::Running { .. } | CoreStatus::Starting) {
@@ -159,16 +292,25 @@ impl CoreManager {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        if matches!(inner.status, CoreStatus::Stopped) {
-            return Ok(());
-        }
-        let proc = inner.process.take();
-        inner.status = CoreStatus::Stopping;
-        drop(inner);
-
-        if let Some(proc) = proc {
+        // Always kill any locally-owned child first. This matters during
+        // the migration window where the user installed the daemon
+        // *after* the app had already direct-spawned mihomo: the daemon
+        // doesn't know about that child, but we still do.
+        let local_proc = {
+            let mut inner = self.inner.lock().await;
+            inner.process.take()
+        };
+        if let Some(proc) = local_proc {
             let _ = spawn_on_tokio(async move { proc.stop().await }).await;
+        }
+
+        // If the daemon is up, tell it to stop too — covers the normal
+        // case where the daemon owns the live mihomo.
+        if crate::services::service_client::is_socket_present() {
+            let _ = spawn_on_tokio(async {
+                crate::services::service_client::stop_core().await
+            })
+            .await;
         }
 
         let mut inner = self.inner.lock().await;
@@ -250,5 +392,17 @@ impl CoreManager {
             };
         }
         inner.process = None;
+    }
+}
+
+/// Translate the daemon's wire-format state into our local enum.
+fn ipc_state_to_status(state: clashr_ipc::CoreState) -> CoreStatus {
+    use clashr_ipc::CoreState;
+    match state {
+        CoreState::Stopped => CoreStatus::Stopped,
+        CoreState::Starting => CoreStatus::Starting,
+        CoreState::Running { pid } => CoreStatus::Running { pid },
+        CoreState::Stopping => CoreStatus::Stopping,
+        CoreState::Failed { reason } => CoreStatus::Failed { reason },
     }
 }
