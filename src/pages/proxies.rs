@@ -8,7 +8,7 @@ use gpui_component::{
     ActiveTheme, Icon, IconName, StyledExt as _, h_flex, v_flex,
     button::{Button, ButtonVariants as _},
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::runtime::spawn_on_tokio;
 use crate::services::mihomo_api::{self, ProxyNode};
@@ -213,6 +213,8 @@ pub struct ProxiesPage {
     all_proxies: HashMap<String, ProxyNode>,
     selected_group: Option<String>,
     loading: bool,
+    /// Set of group names currently being tested.
+    testing_groups: std::collections::HashSet<String>,
 }
 
 impl ProxiesPage {
@@ -222,6 +224,7 @@ impl ProxiesPage {
             all_proxies: HashMap::new(),
             selected_group: None,
             loading: false,
+            testing_groups: std::collections::HashSet::new(),
         };
         page.refresh(cx);
         page
@@ -293,16 +296,92 @@ impl ProxiesPage {
         }).detach();
     }
 
+    /// Color thresholds for displayed delay.
+    ///   <100ms   → green
+    ///   100-300  → amber
+    ///   300+     → orange
+    ///   0 (fail) → red
     fn delay_color(delay: u32, cx: &Context<Self>) -> Hsla {
         if delay == 0 {
-            cx.theme().muted_foreground
-        } else if delay < 200 {
+            hsla(0.0, 0.7, 0.5, 1.0) // red — request failed / timed out
+        } else if delay < 100 {
             hsla(0.32, 0.6, 0.45, 1.0) // green
-        } else if delay < 500 {
-            hsla(0.12, 0.7, 0.5, 1.0) // amber
+        } else if delay <= 300 {
+            hsla(0.13, 0.85, 0.5, 1.0) // amber/yellow
         } else {
-            hsla(0.0, 0.7, 0.5, 1.0) // red
+            hsla(0.07, 0.9, 0.55, 1.0) // orange
         }
+    }
+
+    /// Color for the "未测试" placeholder before any history sample exists.
+    fn unknown_delay_color(cx: &Context<Self>) -> Hsla {
+        cx.theme().muted_foreground
+    }
+
+    /// Run a delay test for every node in `group` in parallel. Results are
+    /// pushed back into `all_proxies[node].history` so the UI shows them.
+    fn delay_test_group(&mut self, group: String, cx: &mut Context<Self>) {
+        if self.testing_groups.contains(&group) {
+            return;
+        }
+        let group_node = match self.groups.iter().find(|g| g.name == group).cloned() {
+            Some(g) => g,
+            None => return,
+        };
+
+        let nodes = group_node.all.clone();
+        if nodes.is_empty() {
+            return;
+        }
+
+        info!(group = %group, count = nodes.len(), "starting group delay test");
+        self.testing_groups.insert(group.clone());
+        cx.notify();
+
+        let group_for_async = group.clone();
+        cx.spawn(async move |entity, cx| {
+            let results = spawn_on_tokio(async move {
+                let mut handles = Vec::new();
+                for node in nodes {
+                    let n = node.clone();
+                    handles.push(tokio::spawn(async move {
+                        let res = mihomo_api::delay_test(
+                            &n,
+                            "https://www.gstatic.com/generate_204",
+                            5000,
+                        )
+                        .await;
+                        // 0 means "failed/timeout" in the rest of our UI.
+                        let delay = res.unwrap_or(0);
+                        (n, delay)
+                    }));
+                }
+                let mut results = Vec::new();
+                for h in handles {
+                    if let Ok(r) = h.await {
+                        results.push(r);
+                    }
+                }
+                results
+            }).await;
+
+            cx.update(|cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |this, cx| {
+                        for (name, delay) in results {
+                            if let Some(node) = this.all_proxies.get_mut(&name) {
+                                node.history.push(crate::services::mihomo_api::DelaySample {
+                                    time: String::new(),
+                                    delay,
+                                });
+                            }
+                        }
+                        this.testing_groups.remove(&group_for_async);
+                        cx.notify();
+                    });
+                }
+            });
+        }).detach();
     }
 
     /// Render a 14px icon for a proxy/group:
@@ -590,6 +669,9 @@ impl Render for ProxiesPage {
             let current = group.now.clone();
             let is_selectable = group.is_user_selectable();
 
+            let is_testing = self.testing_groups.contains(&group_name);
+            let group_for_test = group_name.clone();
+
             let header_row = h_flex()
                 .w_full()
                 .justify_between()
@@ -615,14 +697,30 @@ impl Render for ProxiesPage {
                                 )),
                         ),
                 )
-                .when(!is_selectable, |el| {
-                    el.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("auto-selected by group policy"),
-                    )
-                });
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .when(!is_selectable, |el| {
+                            el.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("auto-selected"),
+                            )
+                        })
+                        .child(
+                            Button::new(SharedString::from(format!("test-{}", group_name)))
+                                .icon(IconName::Loader)
+                                .label(if is_testing { "Testing…" } else { "Test" })
+                                .compact()
+                                .ghost()
+                                .loading(is_testing)
+                                .on_click(cx.listener(move |this, _ev, _w, cx| {
+                                    this.delay_test_group(group_for_test.clone(), cx);
+                                })),
+                        ),
+                );
 
             let group_for_cards = group_name.clone();
             v_flex()
