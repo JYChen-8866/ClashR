@@ -60,7 +60,13 @@ struct ProxiesResponse {
 }
 
 fn client() -> Client {
-    Client::new()
+    // `no_proxy()` is critical: when ClashR's system-proxy toggle is on,
+    // reqwest would otherwise pick up the macOS proxy setting and try to
+    // route 127.0.0.1:9090 through mihomo's mixed port → 502 from mihomo.
+    Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap_or_else(|_| Client::new())
 }
 
 /// Fetch the full proxy state from mihomo. Returns a map keyed by name.

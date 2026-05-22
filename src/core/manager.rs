@@ -201,7 +201,10 @@ impl CoreManager {
 
         info!(path = %abs_path, "reloading config via API");
 
-        let client = Client::new();
+        let client = Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| Client::new());
         let resp = client
             .put("http://127.0.0.1:9090/configs")
             .json(&serde_json::json!({
