@@ -188,8 +188,22 @@ fn scan_dir(dir: &Path, prefix: &str, out: &mut HashMap<String, String>) {
 /// 2. Aliases: name contains an alias keyword → resolve to its target stem
 /// Returns the asset path (loadable via `service-icons/...`) or None.
 fn service_icon_for_name(raw: &str) -> Option<&'static str> {
+    // Cache lookup results to avoid repeated expensive searches
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Option<&'static str>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+
+    // Check cache first
+    {
+        let cache_guard = cache.lock().unwrap();
+        if let Some(cached) = cache_guard.get(raw) {
+            return *cached;
+        }
+    }
+
     let index = icon_index();
     if index.is_empty() {
+        let mut cache_guard = cache.lock().unwrap();
+        cache_guard.insert(raw.to_string(), None);
         return None;
     }
     let lower = raw.to_lowercase();
@@ -198,7 +212,10 @@ fn service_icon_for_name(raw: &str) -> Option<&'static str> {
     for (stem, path) in index {
         if lower.contains(stem) {
             // SAFETY: paths in the index live for the program lifetime.
-            return Some(string_to_static(path));
+            let result = string_to_static(path);
+            let mut cache_guard = cache.lock().unwrap();
+            cache_guard.insert(raw.to_string(), Some(result));
+            return Some(result);
         }
     }
 
@@ -206,11 +223,16 @@ fn service_icon_for_name(raw: &str) -> Option<&'static str> {
     for (keyword, target) in aliases() {
         if lower.contains(&keyword.to_lowercase()) || raw.contains(keyword) {
             if let Some(path) = index.get(&target.to_lowercase()) {
-                return Some(string_to_static(path));
+                let result = string_to_static(path);
+                let mut cache_guard = cache.lock().unwrap();
+                cache_guard.insert(raw.to_string(), Some(result));
+                return Some(result);
             }
         }
     }
 
+    let mut cache_guard = cache.lock().unwrap();
+    cache_guard.insert(raw.to_string(), None);
     None
 }
 
