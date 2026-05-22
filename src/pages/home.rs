@@ -25,7 +25,7 @@ use gpui_component::{
     popover::Popover,
 };
 use serde::Deserialize;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::runtime::spawn_on_tokio;
 
@@ -184,10 +184,22 @@ impl HomePage {
         let stats = match result {
             Ok(s) => s,
             Err(e) => {
-                debug!(error = %e, "stats poll failed");
+                warn!(error = %e, "stats poll failed");
                 return;
             }
         };
+
+        // Log the first successful sample so it's obvious in the log when
+        // polling is alive vs. silently dead.
+        if self.last_total.is_none() {
+            info!(
+                up = stats.upload_total,
+                down = stats.download_total,
+                conn = stats.connections_count,
+                mem = stats.memory_inuse,
+                "first stats poll succeeded"
+            );
+        }
 
         // Speed is the delta between successive cumulative-total samples.
         // First poll has nothing to compare against, so we just record and
@@ -522,6 +534,18 @@ impl HomePage {
                 .into_any_element();
         }
 
+        // AreaChart's linear Y scale degenerates when domain min == max
+        // (i.e. every sample is 0), producing NaN ticks and a blank chart.
+        // Inject a synthetic 1 KB ceiling so a flat baseline still paints
+        // visibly at the bottom.
+        let max = self
+            .samples
+            .iter()
+            .map(|s| s.up.max(s.down))
+            .max()
+            .unwrap_or(0);
+        let ceiling: f64 = if max == 0 { 1024.0 } else { 0.0 };
+
         let data: Vec<TrafficSample> = self.samples.iter().copied().collect();
         let stroke_up = cx.theme().chart_1;
         let fill_up = cx.theme().chart_1.opacity(0.18);
@@ -532,10 +556,16 @@ impl HomePage {
             .x(|s: &TrafficSample| s.seq.to_string())
             .y(|s: &TrafficSample| s.down as f64)
             .y(|s: &TrafficSample| s.up as f64)
+            // Synthetic ceiling series so the linear Y scale has a real
+            // domain even when every real sample is zero. Painted with
+            // transparent stroke/fill so it doesn't show.
+            .y(move |_s: &TrafficSample| ceiling)
             .stroke(stroke_down)
             .fill(fill_down)
             .stroke(stroke_up)
             .fill(fill_up)
+            .stroke(gpui::transparent_black())
+            .fill(gpui::transparent_black())
             .natural()
             .x_axis(false)
             .tick_margin(usize::MAX);
@@ -924,11 +954,10 @@ async fn fetch_stats() -> Result<RawStats, String> {
         download_total: u64,
         #[serde(default)]
         connections: Option<Vec<serde_json::Value>>,
-    }
-    #[derive(Deserialize)]
-    struct MemResp {
+        // mihomo embeds memory directly in /connections; the separate
+        // /memory endpoint reports 0 on this build, so we read it here.
         #[serde(default)]
-        inuse: u64,
+        memory: u64,
     }
 
     let client = reqwest::Client::builder()
@@ -937,27 +966,20 @@ async fn fetch_stats() -> Result<RawStats, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Two parallel HTTP calls.
-    let (conn_res, mem_res) = tokio::join!(
-        client.get(format!("{}/connections", MIHOMO_BASE)).send(),
-        client.get(format!("{}/memory", MIHOMO_BASE)).send(),
-    );
-
-    let conn = conn_res
+    let conn = client
+        .get(format!("{}/connections", MIHOMO_BASE))
+        .send()
+        .await
         .map_err(|e| e.to_string())?
         .json::<ConnResp>()
         .await
         .map_err(|e| e.to_string())?;
-    let mem: MemResp = match mem_res {
-        Ok(r) => r.json().await.unwrap_or(MemResp { inuse: 0 }),
-        Err(_) => MemResp { inuse: 0 },
-    };
 
     Ok(RawStats {
         upload_total: conn.upload_total,
         download_total: conn.download_total,
         connections_count: conn.connections.as_ref().map(|v| v.len() as u32).unwrap_or(0),
-        memory_inuse: mem.inuse,
+        memory_inuse: conn.memory,
     })
 }
 
