@@ -10,6 +10,42 @@ use tracing::{info, warn};
 
 use crate::runtime::spawn_on_tokio;
 use crate::services::subscription;
+use crate::core::paths;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProfilesState {
+    profiles: Vec<ProfileItem>,
+    current_uid: Option<String>,
+}
+
+impl ProfilesState {
+    fn path() -> std::path::PathBuf {
+        paths::data_dir().join("profiles.json")
+    }
+
+    fn load() -> Self {
+        let path = Self::path();
+        if path.exists() {
+            if let Ok(data) = std::fs::read_to_string(&path) {
+                if let Ok(state) = serde_json::from_str(&data) {
+                    return state;
+                }
+            }
+        }
+        Self { profiles: Vec::new(), current_uid: None }
+    }
+
+    fn save(profiles: &[ProfileItem], current_uid: &Option<String>) {
+        let state = ProfilesState {
+            profiles: profiles.to_vec(),
+            current_uid: current_uid.clone(),
+        };
+        let path = Self::path();
+        if let Ok(json) = serde_json::to_string_pretty(&state) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
+}
 
 const GRID_GAP: Pixels = px(16.);
 const CARD_MIN_WIDTH: Pixels = px(320.);
@@ -67,14 +103,36 @@ impl ProfilesPage {
                 .placeholder("Description")
         });
 
+        let state = ProfilesState::load();
+        let initial_profiles = state.profiles.clone();
+        let initial_current_uid = state.current_uid.clone();
+
+        // If we have a previously-active profile on disk, activate and start
+        // the core in the background so the user is up & running immediately.
+        if let Some(uid) = initial_current_uid.clone() {
+            cx.spawn(async move |_entity, _cx| {
+                let _ = spawn_on_tokio(async move {
+                    let mgr = crate::core::CoreManager::global();
+                    if mgr.activate_profile(&uid).is_ok() {
+                        let _ = mgr.start().await;
+                    }
+                    anyhow::Ok(())
+                }).await;
+            }).detach();
+        }
+
         Self {
-            profiles: Vec::new(),
-            current_uid: None,
+            profiles: initial_profiles,
+            current_uid: initial_current_uid,
             url_input,
             desc_input,
             edit_url_input,
             edit_desc_input,
         }
+    }
+
+    fn persist(&self) {
+        ProfilesState::save(&self.profiles, &self.current_uid);
     }
 
     fn show_import_dialog(&mut self, _event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -136,6 +194,7 @@ impl ProfilesPage {
         if self.current_uid.is_none() {
             self.current_uid = Some(uid.clone());
         }
+        self.persist();
         cx.notify();
 
         cx.spawn(async move |entity, cx| {
@@ -196,6 +255,7 @@ impl ProfilesPage {
                                 }
                             }
                         }
+                        this.persist();
                         cx.notify();
                     });
                 }
@@ -208,6 +268,7 @@ impl ProfilesPage {
             return;
         }
         self.current_uid = Some(uid.clone());
+        self.persist();
         cx.notify();
 
         // Activate the runtime config and hot-reload via mihomo API.
@@ -228,6 +289,7 @@ impl ProfilesPage {
     fn edit_profile(&mut self, uid: String, window: &mut Window, cx: &mut Context<Self>) {
         // Also select it
         self.current_uid = Some(uid.clone());
+        self.persist();
         cx.notify();
 
         let profile = match self.profiles.iter().find(|p| p.uid == uid) {
@@ -280,6 +342,7 @@ impl ProfilesPage {
                                 }
                                 profile.updated = Some(now_timestamp());
                             }
+                            this.persist();
                             cx.notify();
                         });
                     }
@@ -294,6 +357,10 @@ impl ProfilesPage {
         if self.current_uid.as_deref() == Some(&uid) {
             self.current_uid = self.profiles.first().map(|p| p.uid.clone());
         }
+        // Also remove the on-disk YAML.
+        let yaml_path = paths::profile_yaml_path(&uid);
+        let _ = std::fs::remove_file(&yaml_path);
+        self.persist();
         cx.notify();
     }
 
@@ -337,6 +404,7 @@ impl ProfilesPage {
                                 }
                             }
                         }
+                        this.persist();
                         cx.notify();
                     });
                 }
