@@ -26,6 +26,8 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "socks"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 dirs-next = "2"
 base64 = "0.22"
 anyhow.workspace = true

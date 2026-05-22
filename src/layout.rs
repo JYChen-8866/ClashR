@@ -5,7 +5,7 @@ use gpui_component::{
 };
 
 use crate::core::{CoreManager, CoreStatus};
-use crate::pages::{ConnectionsPage, HomePage, ProfilesPage, ProxiesPage, SettingsPage};
+use crate::pages::{ConnectionsPage, HomePage, LogsPage, ProfilesPage, ProxiesPage, RulesPage, SettingsPage};
 use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,8 @@ pub struct AppLayout {
     profiles_page: Entity<ProfilesPage>,
     proxies_page: Entity<ProxiesPage>,
     connections_page: Entity<ConnectionsPage>,
+    rules_page: Entity<RulesPage>,
+    logs_page: Entity<LogsPage>,
     settings_page: Entity<SettingsPage>,
     core_status: CoreStatus,
 }
@@ -73,6 +75,8 @@ impl AppLayout {
         let profiles_page = cx.new(|cx| ProfilesPage::new(window, cx));
         let proxies_page = cx.new(|cx| ProxiesPage::new(window, cx));
         let connections_page = cx.new(|cx| ConnectionsPage::new(window, cx));
+        let rules_page = cx.new(|cx| RulesPage::new(window, cx));
+        let logs_page = cx.new(|cx| LogsPage::new(window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
 
         // Poll core status periodically so the indicator stays in sync.
@@ -110,6 +114,8 @@ impl AppLayout {
             profiles_page,
             proxies_page,
             connections_page,
+            rules_page,
+            logs_page,
             settings_page,
             core_status: CoreStatus::Stopped,
         }
@@ -282,8 +288,8 @@ impl Render for AppLayout {
                                 Page::Settings => div().size_full().child(self.settings_page.clone()),
                                 Page::Home => div().size_full().child(self.home_page.clone()),
                                 Page::Connections => div().size_full().child(self.connections_page.clone()),
-                                Page::Rules => div().child("Rules - Routing rules"),
-                                Page::Logs => div().child("Logs - Real-time log stream"),
+                                Page::Rules => div().size_full().child(self.rules_page.clone()),
+                                Page::Logs => div().size_full().child(self.logs_page.clone()),
                             }),
                     ),
             );

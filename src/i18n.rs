@@ -105,6 +105,15 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("conn.process", "Process");
     m.insert("conn.rule", "Rule");
     m.insert("conn.chains", "Chain");
+    // Rules
+    m.insert("rules.type", "Type");
+    m.insert("rules.payload", "Payload");
+    m.insert("rules.proxy", "Proxy");
+    m.insert("rules.loading", "Loading rules…");
+    // Logs
+    m.insert("logs.auto_scroll_on", "Auto-scroll: ON");
+    m.insert("logs.auto_scroll_off", "Auto-scroll: OFF");
+    m.insert("logs.clear", "Clear");
     m
 });
 
@@ -169,5 +178,12 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("conn.process", "进程");
     m.insert("conn.rule", "规则");
     m.insert("conn.chains", "链路");
+    m.insert("rules.type", "类型");
+    m.insert("rules.payload", "匹配内容");
+    m.insert("rules.proxy", "策略");
+    m.insert("rules.loading", "加载规则中…");
+    m.insert("logs.auto_scroll_on", "自动滚动：开");
+    m.insert("logs.auto_scroll_off", "自动滚动：关");
+    m.insert("logs.clear", "清空");
     m
 });
