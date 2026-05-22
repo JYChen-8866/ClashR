@@ -5,7 +5,7 @@ use gpui_component::{
 };
 
 use crate::core::{CoreManager, CoreStatus};
-use crate::pages::{ProfilesPage, SettingsPage};
+use crate::pages::{ProfilesPage, ProxiesPage, SettingsPage};
 use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -60,6 +60,7 @@ impl Page {
 pub struct AppLayout {
     current_page: Page,
     profiles_page: Entity<ProfilesPage>,
+    proxies_page: Entity<ProxiesPage>,
     settings_page: Entity<SettingsPage>,
     core_status: CoreStatus,
 }
@@ -67,6 +68,7 @@ pub struct AppLayout {
 impl AppLayout {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let profiles_page = cx.new(|cx| ProfilesPage::new(window, cx));
+        let proxies_page = cx.new(|cx| ProxiesPage::new(window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
 
         // Poll core status periodically so the indicator stays in sync.
@@ -101,6 +103,7 @@ impl AppLayout {
         Self {
             current_page: Page::Home,
             profiles_page,
+            proxies_page,
             settings_page,
             core_status: CoreStatus::Stopped,
         }
@@ -220,9 +223,9 @@ impl Render for AppLayout {
                             .overflow_hidden()
                             .child(match current {
                                 Page::Profiles => div().size_full().child(self.profiles_page.clone()),
+                                Page::Proxies => div().size_full().child(self.proxies_page.clone()),
                                 Page::Settings => div().size_full().child(self.settings_page.clone()),
                                 Page::Home => div().child("Home - Traffic stats, proxy mode, system proxy controls"),
-                                Page::Proxies => div().child("Proxies - Proxy groups and node selection"),
                                 Page::Connections => div().child("Connections - Active connection list"),
                                 Page::Rules => div().child("Rules - Routing rules"),
                                 Page::Logs => div().child("Logs - Real-time log stream"),
