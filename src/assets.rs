@@ -24,6 +24,7 @@ impl CombinedAssets {
 
 impl AssetSource for CombinedAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        // Handle service-icons/ prefix
         if let Some(rel) = path.strip_prefix("service-icons/") {
             let file = self.icons_dir.join(rel);
             if let Ok(bytes) = std::fs::read(&file) {
@@ -31,6 +32,16 @@ impl AssetSource for CombinedAssets {
             }
             // Fall through to bundled assets if not found.
         }
+
+        // Handle icons/ prefix (for app icon and other icons)
+        if let Some(rel) = path.strip_prefix("icons/") {
+            let file = self.icons_dir.join(rel);
+            if let Ok(bytes) = std::fs::read(&file) {
+                return Ok(Some(Cow::Owned(bytes)));
+            }
+            // Fall through to bundled assets if not found.
+        }
+
         ComponentAssets.load(path)
     }
 
