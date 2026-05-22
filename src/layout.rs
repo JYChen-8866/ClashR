@@ -182,7 +182,7 @@ impl Render for AppLayout {
                                 .items_center()
                                 .gap_2()
                                 .child(
-                                    img("icons/app-icon.jpeg")
+                                    img("icons/app-icon.png")
                                         .size_8()
                                         .flex_shrink_0()
                                         .rounded(cx.theme().radius),
