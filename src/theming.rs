@@ -21,6 +21,8 @@ pub struct Preferences {
     pub theme_name: Option<String>,
     #[serde(default)]
     pub system_proxy_enabled: bool,
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 impl Preferences {

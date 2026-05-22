@@ -188,27 +188,29 @@ impl SettingsPage {
 impl Render for SettingsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
+            .id("settings-scroll")
             .size_full()
             .gap_4()
+            .overflow_y_scroll()
             .child(div().font_bold().text_lg().child("Settings"))
             .child(self.appearance_section(cx))
             .child(self.system_proxy_section(cx))
             .child(self.helper_service_section(cx))
             .child(self.section(
-                "Clash Core",
-                "Manually control the mihomo subprocess. Normally not needed — the core starts and restarts automatically when you select a profile.",
+                crate::i18n::t("settings.clash_core"),
+                "",
                 cx,
                 h_flex()
                     .gap_2()
                     .child(
                         Button::new("restart-core-btn")
-                            .label("Restart Core")
+                            .label(crate::i18n::t("settings.restart_core"))
                             .compact()
                             .on_click(cx.listener(|this, _e, w, cx| this.restart_core(w, cx))),
                     )
                     .child(
                         Button::new("stop-core-btn")
-                            .label("Stop Core")
+                            .label(crate::i18n::t("settings.stop_core"))
                             .compact()
                             .ghost()
                             .on_click(cx.listener(|this, _e, w, cx| this.stop_core(w, cx))),
@@ -286,18 +288,100 @@ impl SettingsPage {
                     )
             });
 
+        // Language picker
+        let cur_locale = crate::i18n::current_locale();
+        let cur_label = crate::i18n::available_locales()
+            .iter()
+            .find(|(k, _)| *k == cur_locale)
+            .map(|(_, v)| *v)
+            .unwrap_or("English");
+
+        let lang_popover = Popover::new("lang-picker")
+            .trigger(
+                Button::new("lang-picker-btn")
+                    .label(SharedString::from(cur_label.to_string()))
+                    .icon(IconName::ChevronDown)
+                    .compact(),
+            )
+            .content(move |_state, _w, cx| {
+                let cur = crate::i18n::current_locale();
+                div()
+                    .id("lang-list")
+                    .py_1()
+                    .min_w(px(140.))
+                    .child(v_flex().children(
+                        crate::i18n::available_locales().iter().map(|(key, label)| {
+                            let is_current = *key == cur;
+                            let k = *key;
+                            let l = *label;
+                            h_flex()
+                                .id(SharedString::from(format!("lang-{}", k)))
+                                .px_3()
+                                .py_1p5()
+                                .gap_2()
+                                .items_center()
+                                .cursor_pointer()
+                                .when(is_current, |el| el.bg(cx.theme().accent.opacity(0.15)))
+                                .hover(|s| s.bg(cx.theme().accent.opacity(0.10)))
+                                .on_mouse_down(MouseButton::Left, move |_ev, _w, _cx| {
+                                    crate::i18n::set_locale(k);
+                                    let prefs = Preferences {
+                                        language: Some(k.to_string()),
+                                        ..Preferences::load()
+                                    };
+                                    prefs.save();
+                                })
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_sm()
+                                        .when(is_current, |el| {
+                                            el.font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(cx.theme().accent)
+                                        })
+                                        .child(l.to_string()),
+                                )
+                                .when(is_current, |el| {
+                                    el.child(
+                                        gpui_component::Icon::new(IconName::Check)
+                                            .size(px(14.))
+                                            .text_color(cx.theme().accent),
+                                    )
+                                })
+                        }),
+                    ))
+            });
+
+        let body = v_flex()
+            .gap_3()
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(div().text_sm().child(crate::i18n::t("settings.theme").to_string()))
+                    .child(popover),
+            )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(div().text_sm().child(crate::i18n::t("settings.language").to_string()))
+                    .child(lang_popover),
+            )
+            .into_any_element();
+
         self.section(
-            "Appearance",
-            "Pick a theme. The choice is saved and restored next launch.",
+            crate::i18n::t("settings.appearance"),
+            "",
             cx,
-            h_flex().gap_2().child(popover).into_any_element(),
+            body,
         )
     }
 
     fn section(
         &self,
         title: &str,
-        description: &str,
+        _description: &str,
         cx: &Context<Self>,
         body: AnyElement,
     ) -> impl IntoElement {
@@ -314,13 +398,7 @@ impl SettingsPage {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(title.to_string()),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(description.to_string()),
-            )
-            .child(div().pt_2().child(body))
+            .child(div().pt_1().child(body))
     }
 
     fn system_proxy_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -348,8 +426,8 @@ impl SettingsPage {
             .into_any_element();
 
         self.section(
-            "System Proxy",
-            "Send your Mac's HTTP, HTTPS, and SOCKS traffic through mihomo so apps and browsers go through the proxy. Requires the core to be running.",
+            crate::i18n::t("settings.system_proxy"),
+            "",
             cx,
             body,
         )
@@ -360,23 +438,22 @@ impl SettingsPage {
         let running = crate::core::service_install::is_service_running();
 
         let (label, color) = match (installed, running) {
-            (true, true) => ("Installed and running", cx.theme().accent),
-            (true, false) => ("Installed but not running", cx.theme().muted_foreground),
-            (false, _) => ("Not installed", cx.theme().muted_foreground),
+            (true, true) => (crate::i18n::t("settings.svc_running"), gpui::hsla(0.33, 0.7, 0.45, 1.0)),
+            (true, false) => (crate::i18n::t("settings.svc_stopped"), gpui::hsla(0.0, 0.7, 0.5, 1.0)),
+            (false, _) => (crate::i18n::t("settings.svc_none"), gpui::hsla(0.0, 0.7, 0.5, 1.0)),
         };
 
         let buttons = if installed {
             h_flex().gap_2().child(
                 Button::new("svc-uninstall")
-                    .label("Uninstall Helper")
+                    .label(crate::i18n::t("settings.uninstall_helper"))
                     .compact()
-                    .ghost()
                     .on_click(cx.listener(|this, _e, _w, cx| this.uninstall_helper(cx))),
             )
         } else {
             h_flex().gap_2().child(
                 Button::new("svc-install")
-                    .label("Install Helper")
+                    .label(crate::i18n::t("settings.install_helper"))
                     .compact()
                     .on_click(cx.listener(|this, _e, _w, cx| this.install_helper(cx))),
             )
@@ -400,8 +477,8 @@ impl SettingsPage {
             .into_any_element();
 
         self.section(
-            "Helper Service",
-            "A small root-privileged daemon that launches mihomo. Required for TUN mode (which creates a virtual network adapter and needs admin rights). Installs to /Library/LaunchDaemons and survives reboots.",
+            crate::i18n::t("settings.helper_service"),
+            "",
             cx,
             body,
         )

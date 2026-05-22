@@ -90,12 +90,12 @@ pub struct HomePage {
     samples: VecDeque<TrafficSample>,
     last_total: Option<(u64, u64)>,
 
-    cur_up_speed: u64,
-    cur_down_speed: u64,
-    cur_up_total: u64,
-    cur_down_total: u64,
-    cur_connections: u32,
-    cur_memory: u64,
+    pub cur_up_speed: u64,
+    pub cur_down_speed: u64,
+    pub cur_up_total: u64,
+    pub cur_down_total: u64,
+    pub cur_connections: u32,
+    pub cur_memory: u64,
 
     mode: Option<String>,
     global_now: Option<String>,
@@ -151,9 +151,31 @@ impl HomePage {
         })
         .detach();
 
-        // Fire one IP lookup on first paint.
+        // Fire IP lookup after a delay — mihomo needs a few seconds to
+        // fully start and accept proxy connections.
         let entity = cx.entity().downgrade();
         cx.spawn(async move |_e, cx| {
+            // Wait for mihomo's external controller to be reachable.
+            spawn_on_tokio(async {
+                let client = reqwest::Client::builder()
+                    .no_proxy()
+                    .timeout(Duration::from_millis(500))
+                    .build()
+                    .unwrap();
+                for _ in 0..15 {
+                    if client
+                        .get(format!("{}/configs", MIHOMO_BASE))
+                        .send()
+                        .await
+                        .is_ok()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            })
+            .await;
+
             let result = spawn_on_tokio(async { fetch_ip_info().await }).await;
             let _ = cx.update(|cx| {
                 if let Some(entity) = entity.upgrade() {
@@ -188,6 +210,10 @@ impl HomePage {
             ip_state: IpState::Loading,
             show_ip: false,
         }
+    }
+
+    pub fn speeds(&self) -> (String, String) {
+        (format_speed(self.cur_up_speed), format_speed(self.cur_down_speed))
     }
 
     fn ingest_stats(&mut self, result: Result<RawStats, String>) {
@@ -367,6 +393,36 @@ impl HomePage {
         .detach();
     }
 
+    fn set_network_mode(&mut self, mode: &'static str, cx: &mut Context<Self>) {
+        match mode {
+            "off" => {
+                if self.tun_enabled {
+                    self.toggle_tun(false, cx);
+                }
+                if self.system_proxy_on {
+                    self.toggle_system_proxy(false, cx);
+                }
+            }
+            "sysproxy" => {
+                if self.tun_enabled {
+                    self.toggle_tun(false, cx);
+                }
+                if !self.system_proxy_on {
+                    self.toggle_system_proxy(true, cx);
+                }
+            }
+            "tun" => {
+                if self.system_proxy_on {
+                    self.toggle_system_proxy(false, cx);
+                }
+                if !self.tun_enabled {
+                    self.toggle_tun(true, cx);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn run_site_test(&mut self, idx: usize, cx: &mut Context<Self>) {
         if idx >= self.sites.len() {
             return;
@@ -451,9 +507,9 @@ impl HomePage {
             .p_1()
             .rounded_md()
             .bg(cx.theme().muted.opacity(0.4))
-            .child(mode_btn("rule", "Rule"))
-            .child(mode_btn("global", "Global"))
-            .child(mode_btn("direct", "Direct"));
+            .child(mode_btn("rule", crate::i18n::t("home.mode_rule")))
+            .child(mode_btn("global", crate::i18n::t("home.mode_global")))
+            .child(mode_btn("direct", crate::i18n::t("home.mode_direct")));
 
         // Show the GLOBAL group node picker only in global mode — that's the
         // only mode where this selection actually routes traffic.
@@ -467,66 +523,55 @@ impl HomePage {
             segmented.into_any_element()
         };
 
-        section_card(cx, "代理模式", body)
+        section_card(cx, crate::i18n::t("home.proxy_mode"), body)
     }
 
     fn network_section(&self, cx: &Context<Self>) -> impl IntoElement {
-        let row = |label: &'static str, hint: String, on: bool, key: &'static str| {
-            let switch_id = SharedString::from(format!("net-{}", key));
-            h_flex()
-                .w_full()
-                .justify_between()
-                .items_center()
-                .gap_3()
-                .child(
-                    v_flex()
-                        .gap_0p5()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(label.to_string()),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(hint),
-                        ),
-                )
-                .child(
-                    Switch::new(switch_id)
-                        .checked(on)
-                        .on_click(cx.listener(move |this, checked: &bool, w, cx| {
-                            match key {
-                                "sysproxy" => this.toggle_system_proxy(*checked, cx),
-                                "tun" => this.toggle_tun(*checked, cx),
-                                _ => {}
-                            }
-                            let _ = w;
-                        })),
-                )
-        };
-
-        let sysproxy_hint = if self.system_proxy_on {
-            format!("HTTP/HTTPS/SOCKS → {}:{}", SYS_PROXY_HOST, SYS_PROXY_PORT)
+        let current = if self.tun_enabled {
+            "tun"
+        } else if self.system_proxy_on {
+            "sysproxy"
         } else {
-            "Off — apps won't go through mihomo".to_string()
-        };
-        let tun_hint = if self.tun_enabled {
-            "On — all system traffic via TUN".to_string()
-        } else {
-            "Off — needs admin privilege to enable".to_string()
+            "off"
         };
 
-        let body = v_flex()
-            .gap_3()
-            .child(row("系统代理", sysproxy_hint, self.system_proxy_on, "sysproxy"))
-            .child(div().h(px(1.)).bg(cx.theme().border))
-            .child(row("虚拟网卡 (TUN)", tun_hint, self.tun_enabled, "tun"))
-            .into_any_element();
+        let net_btn = |key: &'static str, label: &'static str| {
+            let active = current == key;
+            let primary = cx.theme().primary;
+            v_flex()
+                .id(SharedString::from(format!("net-{}", key)))
+                .px_4()
+                .py_1p5()
+                .rounded_md()
+                .cursor_pointer()
+                .when(active, |el| {
+                    el.bg(primary).text_color(cx.theme().primary_foreground)
+                })
+                .when(!active, |el| {
+                    el.text_color(cx.theme().foreground)
+                        .hover(|s| s.bg(cx.theme().muted.opacity(0.5)))
+                })
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(label.to_string()),
+                )
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _ev, _w, cx| {
+                    this.set_network_mode(key, cx);
+                }))
+        };
 
-        section_card(cx, "网络设置", body)
+        let segmented = h_flex()
+            .gap_1()
+            .p_1()
+            .rounded_md()
+            .bg(cx.theme().muted.opacity(0.4))
+            .child(net_btn("off", crate::i18n::t("home.net_off")))
+            .child(net_btn("sysproxy", crate::i18n::t("home.net_sysproxy")))
+            .child(net_btn("tun", crate::i18n::t("home.net_tun")));
+
+        section_card(cx, crate::i18n::t("home.network"), segmented.into_any_element())
     }
 
     fn global_node_picker(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -614,18 +659,18 @@ impl HomePage {
         let cards = h_flex()
             .gap_3()
             .flex_wrap()
-            .child(self.stat_card("上传速度", &format_speed(self.cur_up_speed), cx))
-            .child(self.stat_card("下载速度", &format_speed(self.cur_down_speed), cx))
-            .child(self.stat_card("活跃连接", &self.cur_connections.to_string(), cx))
-            .child(self.stat_card("上传量", &format_bytes(self.cur_up_total), cx))
-            .child(self.stat_card("下载量", &format_bytes(self.cur_down_total), cx))
-            .child(self.stat_card("内核占用", &format_bytes(self.cur_memory), cx));
+            .child(self.stat_card(crate::i18n::t("home.upload_speed"), &format_speed(self.cur_up_speed), cx))
+            .child(self.stat_card(crate::i18n::t("home.download_speed"), &format_speed(self.cur_down_speed), cx))
+            .child(self.stat_card(crate::i18n::t("home.active_conn"), &self.cur_connections.to_string(), cx))
+            .child(self.stat_card(crate::i18n::t("home.upload_total"), &format_bytes(self.cur_up_total), cx))
+            .child(self.stat_card(crate::i18n::t("home.download_total"), &format_bytes(self.cur_down_total), cx))
+            .child(self.stat_card(crate::i18n::t("home.memory"), &format_bytes(self.cur_memory), cx));
 
         let chart = self.traffic_chart(cx);
 
         section_card(
             cx,
-            "流量统计",
+            crate::i18n::t("home.traffic"),
             v_flex().gap_4().child(cards).child(chart).into_any_element(),
         )
     }
@@ -787,7 +832,7 @@ impl HomePage {
                     )
                     .child(
                         Button::new(SharedString::from(format!("site-test-{}", idx)))
-                            .label(if busy { "测试中" } else { "测试" })
+                            .label(if busy { crate::i18n::t("home.testing") } else { crate::i18n::t("home.test") })
                             .compact()
                             .ghost()
                             .on_click(cx.listener(move |this, _e, _w, cx| {
@@ -818,7 +863,7 @@ impl HomePage {
                     div()
                         .text_sm()
                         .text_color(hsla(0.0, 0.7, 0.5, 1.0))
-                        .child("查询失败"),
+                        .child(crate::i18n::t("home.query_failed")),
                 )
                 .child(
                     div()
@@ -838,7 +883,7 @@ impl HomePage {
                 div()
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("IP 信息"),
+                    .child(crate::i18n::t("home.ip_info")),
             )
             .child(
                 Button::new("ip-refresh")

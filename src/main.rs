@@ -2,6 +2,7 @@ mod app;
 mod assets;
 mod components;
 mod core;
+mod i18n;
 mod layout;
 mod logging;
 mod pages;
@@ -79,6 +80,12 @@ fn main() {
                 // Apply the user's previously selected theme (if any) before
                 // building the root view, so the first paint is correct.
                 theming::apply_saved_theme_or_default(window, cx);
+
+                // Apply saved locale.
+                let prefs = theming::Preferences::load();
+                if let Some(ref lang) = prefs.language {
+                    i18n::set_locale(lang);
+                }
 
                 let view = cx.new(|cx| AppLayout::new(window, cx));
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))

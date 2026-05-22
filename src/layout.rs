@@ -22,13 +22,13 @@ pub enum Page {
 impl Page {
     pub fn label(&self) -> &'static str {
         match self {
-            Page::Home => "Home",
-            Page::Proxies => "Proxies",
-            Page::Profiles => "Profiles",
-            Page::Connections => "Connections",
-            Page::Rules => "Rules",
-            Page::Logs => "Logs",
-            Page::Settings => "Settings",
+            Page::Home => crate::i18n::t("nav.home"),
+            Page::Proxies => crate::i18n::t("nav.proxies"),
+            Page::Profiles => crate::i18n::t("nav.profiles"),
+            Page::Connections => crate::i18n::t("nav.connections"),
+            Page::Rules => crate::i18n::t("nav.rules"),
+            Page::Logs => crate::i18n::t("nav.logs"),
+            Page::Settings => crate::i18n::t("nav.settings"),
         }
     }
 
@@ -114,11 +114,11 @@ impl AppLayout {
 
     fn status_label(&self) -> (&'static str, Hsla) {
         match &self.core_status {
-            CoreStatus::Stopped => ("Stopped", hsla(0.0, 0.0, 0.6, 1.0)),
-            CoreStatus::Starting => ("Starting…", hsla(0.12, 0.7, 0.5, 1.0)),
-            CoreStatus::Running { .. } => ("Running", hsla(0.32, 0.6, 0.45, 1.0)),
-            CoreStatus::Stopping => ("Stopping…", hsla(0.12, 0.7, 0.5, 1.0)),
-            CoreStatus::Failed { .. } => ("Failed", hsla(0.0, 0.7, 0.5, 1.0)),
+            CoreStatus::Stopped => (crate::i18n::t("status.stopped"), hsla(0.0, 0.0, 0.6, 1.0)),
+            CoreStatus::Starting => (crate::i18n::t("status.starting"), hsla(0.12, 0.7, 0.5, 1.0)),
+            CoreStatus::Running { .. } => (crate::i18n::t("status.running"), hsla(0.32, 0.6, 0.45, 1.0)),
+            CoreStatus::Stopping => (crate::i18n::t("status.stopping"), hsla(0.12, 0.7, 0.5, 1.0)),
+            CoreStatus::Failed { .. } => (crate::i18n::t("status.failed"), hsla(0.0, 0.7, 0.5, 1.0)),
         }
     }
 }
@@ -188,15 +188,14 @@ impl Render for AppLayout {
                         ),
                     )
                     .child(
-                        SidebarGroup::new("Navigation")
+                        SidebarGroup::new(crate::i18n::t("nav.navigation"))
                             .child(SidebarMenu::new().children(menu_items)),
                     )
                     .footer(
                         SidebarFooter::new().child(
-                            h_flex()
+                            v_flex()
                                 .w_full()
-                                .justify_between()
-                                .items_center()
+                                .gap_1()
                                 .child({
                                     let (label, color) = self.status_label();
                                     h_flex()
@@ -210,14 +209,15 @@ impl Render for AppLayout {
                                                 .child(label),
                                         )
                                 })
-                                .child(
+                                .child({
+                                    let (up, down) = self.home_page.read(cx).speeds();
                                     h_flex()
                                         .gap_2()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child("0 B/s ↑")
-                                        .child("0 B/s ↓"),
-                                ),
+                                        .child(format!("{} ↑", up))
+                                        .child(format!("{} ↓", down))
+                                }),
                         ),
                     ),
             )
