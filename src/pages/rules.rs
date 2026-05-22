@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, StyledExt as _, h_flex, v_flex,
+    ActiveTheme, StyledExt as _, VirtualListScrollHandle, h_flex, v_flex, v_virtual_list,
     button::{Button, ButtonVariants as _},
 };
 use serde::Deserialize;
@@ -31,6 +31,7 @@ pub struct RulesPage {
     rules: Vec<Rule>,
     loading: bool,
     error: Option<String>,
+    scroll_handle: VirtualListScrollHandle,
 }
 
 impl RulesPage {
@@ -39,6 +40,7 @@ impl RulesPage {
             rules: Vec::new(),
             loading: true,
             error: None,
+            scroll_handle: VirtualListScrollHandle::new(),
         };
         me.refresh(cx);
         me
@@ -133,45 +135,52 @@ impl Render for RulesPage {
                 .child(err.clone())
                 .into_any_element()
         } else {
-            let rows = self.rules
-                .iter()
-                .map(|r| {
-                    h_flex()
-                        .w_full()
-                        .px_3()
-                        .py_1p5()
-                        .gap_2()
-                        .text_xs()
-                        .border_b_1()
-                        .border_color(cx.theme().border.opacity(0.5))
-                        .child(
-                            div()
-                                .w(px(40.))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(r.index.to_string()),
-                        )
-                        .child(div().w(px(140.)).child(r.rule_type.clone()))
-                        .child(
-                            div()
-                                .flex_1()
-                                .overflow_x_hidden()
-                                .child(r.payload.clone()),
-                        )
-                        .child(
-                            div()
-                                .w(px(180.))
-                                .overflow_x_hidden()
-                                .child(r.proxy.clone()),
-                        )
-                })
-                .collect::<Vec<_>>();
+            // Use virtual list for better performance with large rule sets
+            let item_count = self.rules.len();
+            let item_sizes = Rc::new(vec![size(px(100.), px(28.)); item_count]);
 
-            div()
-                .id("rules-rows-scroll")
-                .flex_1()
-                .overflow_y_scroll()
-                .child(v_flex().children(rows))
-                .into_any_element()
+            let entity = cx.entity().clone();
+            v_virtual_list(
+                entity,
+                "rules-virtual-list",
+                item_sizes,
+                move |this, range, _window, cx| {
+                    range
+                        .map(|i| {
+                            let r = &this.rules[i];
+                            h_flex()
+                                .w_full()
+                                .px_3()
+                                .py_1p5()
+                                .gap_2()
+                                .text_xs()
+                                .border_b_1()
+                                .border_color(cx.theme().border.opacity(0.5))
+                                .child(
+                                    div()
+                                        .w(px(40.))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(r.index.to_string()),
+                                )
+                                .child(div().w(px(140.)).child(r.rule_type.clone()))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .overflow_x_hidden()
+                                        .child(r.payload.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(180.))
+                                        .overflow_x_hidden()
+                                        .child(r.proxy.clone()),
+                                )
+                        })
+                        .collect()
+                },
+            )
+            .track_scroll(&self.scroll_handle)
+            .into_any_element()
         };
 
         v_flex()
