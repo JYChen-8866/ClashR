@@ -67,6 +67,7 @@ pub struct AppLayout {
     logs_page: Entity<LogsPage>,
     settings_page: Entity<SettingsPage>,
     core_status: CoreStatus,
+    sidebar_collapsed: bool,
 }
 
 impl AppLayout {
@@ -118,7 +119,13 @@ impl AppLayout {
             logs_page,
             settings_page,
             core_status: CoreStatus::Stopped,
+            sidebar_collapsed: false,
         }
+    }
+
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
     }
 
     fn status_label(&self) -> (&'static str, Hsla) {
@@ -164,16 +171,12 @@ impl Render for AppLayout {
             .size_full()
             .bg(cx.theme().background)
             .child(
-                // Left: sidebar with top padding for macOS traffic lights
-                div()
-                    .h_full()  // Full height
-                    .pt(px(28.))  // Space for macOS traffic lights
-                    .child(
-                        Sidebar::new("main-sidebar")
-                            .collapsible(SidebarCollapsible::Icon)
-                            .collapsed(false)
-                            .w(px(200.))
-                            .header(
+                // Left: sidebar
+                Sidebar::new("main-sidebar")
+                    .collapsible(SidebarCollapsible::Icon)
+                    .collapsed(self.sidebar_collapsed)
+                    .w(px(200.))
+                    .header(
                                 SidebarHeader::new().child(
                             h_flex()
                                 .items_center()
@@ -241,25 +244,61 @@ impl Render for AppLayout {
                                 }),
                         ),
                     ),
-                ),
             )
             .child(
-                // Right: main content
-                div()
+                // Right: main content with collapse button
+                v_flex()
                     .flex_1()
                     .h_full()
                     .min_w_0()
-                    .p_4()
-                    .overflow_hidden()
-                    .child(match current {
-                        Page::Profiles => div().size_full().child(self.profiles_page.clone()),
-                        Page::Proxies => div().size_full().child(self.proxies_page.clone()),
-                        Page::Settings => div().size_full().child(self.settings_page.clone()),
-                        Page::Home => div().size_full().child(self.home_page.clone()),
-                        Page::Connections => div().size_full().child(self.connections_page.clone()),
-                        Page::Rules => div().size_full().child(self.rules_page.clone()),
-                        Page::Logs => div().size_full().child(self.logs_page.clone()),
-                    }),
+                    .child(
+                        // Top bar with collapse button
+                        div()
+                            .w_full()
+                            .h(px(40.))
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .id("sidebar-toggle")
+                                    .cursor_pointer()
+                                    .p_1()
+                                    .rounded_md()
+                                    .hover(|this| this.bg(cx.theme().muted))
+                                    .child(
+                                        gpui_component::Icon::new(
+                                            if self.sidebar_collapsed {
+                                                IconName::PanelLeft
+                                            } else {
+                                                IconName::PanelLeftClose
+                                            }
+                                        )
+                                        .size_4()
+                                        .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .on_click(cx.listener(|this, _e, _w, cx| this.toggle_sidebar(cx))),
+                            ),
+                    )
+                    .child(
+                        // Main content
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .p_4()
+                            .overflow_hidden()
+                            .child(match current {
+                                Page::Profiles => div().size_full().child(self.profiles_page.clone()),
+                                Page::Proxies => div().size_full().child(self.proxies_page.clone()),
+                                Page::Settings => div().size_full().child(self.settings_page.clone()),
+                                Page::Home => div().size_full().child(self.home_page.clone()),
+                                Page::Connections => div().size_full().child(self.connections_page.clone()),
+                                Page::Rules => div().size_full().child(self.rules_page.clone()),
+                                Page::Logs => div().size_full().child(self.logs_page.clone()),
+                            }),
+                    ),
             )
     }
 }
