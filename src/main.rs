@@ -1,4 +1,5 @@
 mod app;
+mod assets;
 mod components;
 mod core;
 mod layout;
@@ -8,7 +9,7 @@ mod runtime;
 mod services;
 
 use gpui::*;
-use gpui_component_assets::Assets;
+use assets::CombinedAssets;
 use layout::AppLayout;
 
 fn main() {
@@ -60,7 +61,7 @@ fn main() {
 
     tracing::info!("ClashR starting");
 
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_platform::application().with_assets(CombinedAssets::new());
 
     app.run(move |cx| {
         gpui_component::init(cx);
