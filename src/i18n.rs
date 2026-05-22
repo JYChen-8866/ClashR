@@ -97,6 +97,14 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("status.starting", "Starting");
     m.insert("status.stopping", "Stopping");
     m.insert("status.failed", "Failed");
+    // Connections
+    m.insert("conn.active", "active");
+    m.insert("conn.close_all", "Close All");
+    m.insert("conn.host", "Host");
+    m.insert("conn.network", "Net");
+    m.insert("conn.process", "Process");
+    m.insert("conn.rule", "Rule");
+    m.insert("conn.chains", "Chain");
     m
 });
 
@@ -154,5 +162,12 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("status.starting", "启动中");
     m.insert("status.stopping", "停止中");
     m.insert("status.failed", "失败");
+    m.insert("conn.active", "活跃");
+    m.insert("conn.close_all", "全部关闭");
+    m.insert("conn.host", "目标");
+    m.insert("conn.network", "网络");
+    m.insert("conn.process", "进程");
+    m.insert("conn.rule", "规则");
+    m.insert("conn.chains", "链路");
     m
 });

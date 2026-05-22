@@ -1,11 +1,11 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    ActiveTheme, IconName, StyledExt as _, h_flex, v_flex, sidebar::*,
+    ActiveTheme, IconName, StyledExt as _, TitleBar, h_flex, v_flex, sidebar::*,
 };
 
 use crate::core::{CoreManager, CoreStatus};
-use crate::pages::{HomePage, ProfilesPage, ProxiesPage, SettingsPage};
+use crate::pages::{ConnectionsPage, HomePage, ProfilesPage, ProxiesPage, SettingsPage};
 use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -62,6 +62,7 @@ pub struct AppLayout {
     home_page: Entity<HomePage>,
     profiles_page: Entity<ProfilesPage>,
     proxies_page: Entity<ProxiesPage>,
+    connections_page: Entity<ConnectionsPage>,
     settings_page: Entity<SettingsPage>,
     core_status: CoreStatus,
 }
@@ -71,6 +72,7 @@ impl AppLayout {
         let home_page = cx.new(|cx| HomePage::new(window, cx));
         let profiles_page = cx.new(|cx| ProfilesPage::new(window, cx));
         let proxies_page = cx.new(|cx| ProxiesPage::new(window, cx));
+        let connections_page = cx.new(|cx| ConnectionsPage::new(window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
 
         // Poll core status periodically so the indicator stays in sync.
@@ -107,6 +109,7 @@ impl AppLayout {
             home_page,
             profiles_page,
             proxies_page,
+            connections_page,
             settings_page,
             core_status: CoreStatus::Stopped,
         }
@@ -124,7 +127,7 @@ impl AppLayout {
 }
 
 impl Render for AppLayout {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current_page;
 
         let menu_items: Vec<SidebarMenuItem> = Page::all()
@@ -150,7 +153,41 @@ impl Render for AppLayout {
             })
             .collect();
 
-        h_flex()
+        // In fullscreen, macOS hides the traffic lights, leaving the
+        // TitleBar's 80px left padding as wasted space. Pull our content
+        // back into that area with a negative left margin.
+        let fullscreen = window.is_fullscreen();
+
+        let title_bar = TitleBar::new().child(
+            h_flex()
+                .w_full()
+                .px_2()
+                .gap_2()
+                .items_center()
+                .when(fullscreen, |this| this.ml(-px(80.)))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child("ClashR"),
+                )
+                .child({
+                    let (label, color) = self.status_label();
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .child(div().size(px(6.)).rounded_full().bg(color))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(label),
+                        )
+                }),
+        );
+
+        let body = h_flex()
             .size_full()
             .bg(cx.theme().background)
             .child(
@@ -177,7 +214,13 @@ impl Render for AppLayout {
                                 )
                                 .child(
                                     v_flex()
-                                        .child(div().font_bold().child("ClashR"))
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(cx.theme().sidebar_foreground)
+                                                .child("ClashR"),
+                                        )
                                         .child(
                                             div()
                                                 .text_xs()
@@ -238,12 +281,17 @@ impl Render for AppLayout {
                                 Page::Proxies => div().size_full().child(self.proxies_page.clone()),
                                 Page::Settings => div().size_full().child(self.settings_page.clone()),
                                 Page::Home => div().size_full().child(self.home_page.clone()),
-                                Page::Connections => div().child("Connections - Active connection list"),
+                                Page::Connections => div().size_full().child(self.connections_page.clone()),
                                 Page::Rules => div().child("Rules - Routing rules"),
                                 Page::Logs => div().child("Logs - Real-time log stream"),
                             }),
                     ),
-            )
+            );
+
+        v_flex()
+            .size_full()
+            .child(title_bar)
+            .child(body)
     }
 }
 
