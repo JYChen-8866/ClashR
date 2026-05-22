@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, StyledExt as _, h_flex, v_flex,
+    ActiveTheme, StyledExt as _, VirtualListScrollHandle, h_flex, v_flex, v_virtual_list,
     button::{Button, ButtonVariants as _},
 };
 use serde::Deserialize;
@@ -57,6 +57,7 @@ pub struct ConnectionsPage {
     connections: Vec<Connection>,
     download_total: u64,
     upload_total: u64,
+    scroll_handle: VirtualListScrollHandle,
 }
 
 impl ConnectionsPage {
@@ -94,6 +95,7 @@ impl ConnectionsPage {
             connections: Vec::new(),
             download_total: 0,
             upload_total: 0,
+            scroll_handle: VirtualListScrollHandle::new(),
         }
     }
 
@@ -164,59 +166,75 @@ impl Render for ConnectionsPage {
             .child(div().w(px(70.)).child("↑"))
             .child(div().w(px(70.)).child("↓"));
 
-        let rows = self.connections.iter().map(|conn| {
-            let host = if conn.metadata.host.is_empty() {
-                format!("{}:{}", conn.metadata.source_ip, conn.metadata.destination_port)
-            } else {
-                format!("{}:{}", conn.metadata.host, conn.metadata.destination_port)
-            };
-            let chain = conn.chains.first().cloned().unwrap_or_default();
-            let rule_display = if conn.rule_payload.is_empty() {
-                conn.rule.clone()
-            } else {
-                format!("{} ({})", conn.rule, conn.rule_payload)
-            };
+        // Use virtual list for better performance with many connections
+        let item_count = self.connections.len();
+        let item_sizes = Rc::new(vec![size(px(100.), px(28.)); item_count]);
 
-            h_flex()
-                .w_full()
-                .px_3()
-                .py_1p5()
-                .gap_2()
-                .text_xs()
-                .border_b_1()
-                .border_color(cx.theme().border.opacity(0.5))
-                .child(
-                    div()
-                        .w(px(200.))
-                        .overflow_x_hidden()
-                        .child(host),
-                )
-                .child(
-                    div()
-                        .w(px(60.))
-                        .child(format!("{}/{}", conn.metadata.network, conn.metadata.conn_type)),
-                )
-                .child(
-                    div()
-                        .w(px(120.))
-                        .overflow_x_hidden()
-                        .child(conn.metadata.process.clone()),
-                )
-                .child(
-                    div()
-                        .w(px(80.))
-                        .overflow_x_hidden()
-                        .child(rule_display),
-                )
-                .child(
-                    div()
-                        .w(px(150.))
-                        .overflow_x_hidden()
-                        .child(chain),
-                )
-                .child(div().w(px(70.)).child(format_bytes(conn.upload)))
-                .child(div().w(px(70.)).child(format_bytes(conn.download)))
-        });
+        let entity = cx.entity().clone();
+        let body = v_virtual_list(
+            entity,
+            "connections-virtual-list",
+            item_sizes,
+            move |this, range, _window, cx| {
+                range
+                    .map(|i| {
+                        let conn = &this.connections[i];
+                        let host = if conn.metadata.host.is_empty() {
+                            format!("{}:{}", conn.metadata.source_ip, conn.metadata.destination_port)
+                        } else {
+                            format!("{}:{}", conn.metadata.host, conn.metadata.destination_port)
+                        };
+                        let chain = conn.chains.first().cloned().unwrap_or_default();
+                        let rule_display = if conn.rule_payload.is_empty() {
+                            conn.rule.clone()
+                        } else {
+                            format!("{} ({})", conn.rule, conn.rule_payload)
+                        };
+
+                        h_flex()
+                            .w_full()
+                            .px_3()
+                            .py_1p5()
+                            .gap_2()
+                            .text_xs()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.5))
+                            .child(
+                                div()
+                                    .w(px(200.))
+                                    .overflow_x_hidden()
+                                    .child(host),
+                            )
+                            .child(
+                                div()
+                                    .w(px(60.))
+                                    .child(format!("{}/{}", conn.metadata.network, conn.metadata.conn_type)),
+                            )
+                            .child(
+                                div()
+                                    .w(px(120.))
+                                    .overflow_x_hidden()
+                                    .child(conn.metadata.process.clone()),
+                            )
+                            .child(
+                                div()
+                                    .w(px(80.))
+                                    .overflow_x_hidden()
+                                    .child(rule_display),
+                            )
+                            .child(
+                                div()
+                                    .w(px(150.))
+                                    .overflow_x_hidden()
+                                    .child(chain),
+                            )
+                            .child(div().w(px(70.)).child(format_bytes(conn.upload)))
+                            .child(div().w(px(70.)).child(format_bytes(conn.download)))
+                    })
+                    .collect()
+            },
+        )
+        .track_scroll(&self.scroll_handle);
 
         v_flex()
             .id("connections-scroll")
@@ -224,13 +242,7 @@ impl Render for ConnectionsPage {
             .gap_3()
             .child(header)
             .child(table_header)
-            .child(
-                div()
-                    .id("conn-rows-scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .child(v_flex().children(rows)),
-            )
+            .child(body)
     }
 }
 
