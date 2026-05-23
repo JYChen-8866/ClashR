@@ -1578,6 +1578,27 @@ async fn put_global_node(name: &str) -> anyhow::Result<()> {
 }
 
 async fn patch_tun(enable: bool) -> anyhow::Result<()> {
+    // First, update the runtime.yaml file to persist the TUN state
+    let runtime_path = crate::core::paths::runtime_yaml_path();
+    if let Ok(content) = std::fs::read_to_string(&runtime_path) {
+        if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            if let serde_yaml::Value::Mapping(ref mut map) = doc {
+                let tun_key = serde_yaml::Value::String("tun".into());
+                if let Some(serde_yaml::Value::Mapping(ref mut tun_map)) = map.get_mut(&tun_key) {
+                    let enable_key = serde_yaml::Value::String("enable".into());
+                    tun_map.insert(enable_key, serde_yaml::Value::Bool(enable));
+
+                    // Write back to file
+                    if let Ok(output) = serde_yaml::to_string(&doc) {
+                        let _ = std::fs::write(&runtime_path, output);
+                        tracing::info!(enable, "TUN state persisted to config file");
+                    }
+                }
+            }
+        }
+    }
+
+    // Then, apply the change via mihomo API
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(3))
@@ -1590,7 +1611,9 @@ async fn patch_tun(enable: bool) -> anyhow::Result<()> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
+        tracing::error!(status = %status, body = %body, "TUN toggle API failed");
         anyhow::bail!("HTTP {} — {}", status, body);
     }
+    tracing::info!(enable, "TUN toggle API succeeded");
     Ok(())
 }
