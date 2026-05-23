@@ -351,7 +351,7 @@ impl Render for AppLayout {
                             // wrapper draws the only vertical seam.
                             .border_r_0()
                             .header(
-                                SidebarHeader::new().child(
+                                SidebarHeader::new().p_0().child(
                                     h_flex()
                                         .items_center()
                                         .gap_2()
@@ -379,10 +379,7 @@ impl Render for AppLayout {
                                         ),
                                 ),
                             )
-                            .child(
-                                SidebarGroup::new(crate::i18n::t("nav.navigation"))
-                                    .child(SidebarMenu::new().children(menu_items)),
-                            ),
+                            .child(SidebarMenu::new().children(menu_items)),
                     ),
             )
             .child(
