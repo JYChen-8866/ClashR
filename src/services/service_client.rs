@@ -3,6 +3,11 @@
 //! Each high-level operation opens a fresh connection, does Hello +
 //! request + response, then drops it. This is simpler than pooling and
 //! per-connection cost is negligible — Unix socket connect is microseconds.
+//!
+//! Note: This module is Unix-only. Windows doesn't need the helper service
+//! because it doesn't require elevated privileges for system proxy settings.
+
+#![cfg(unix)]
 
 use anyhow::{Context, Result, bail};
 use clashr_ipc::{CoreState, PROTOCOL_VERSION, Request, Response, SOCKET_PATH, transport};
