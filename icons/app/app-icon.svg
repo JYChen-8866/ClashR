@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9277E5"/>
+      <stop offset="100%" stop-color="#5B3FB3"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App tile -->
+  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="url(#bg)"/>
+  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="url(#sheen)"/>
+
+  <!-- Background routing dots, evoke a network mesh without being noisy -->
+  <g fill="#FFFFFF" fill-opacity="0.18">
+    <circle cx="44"  cy="60"  r="3"/>
+    <circle cx="208" cy="92"  r="3"/>
+    <circle cx="60"  cy="196" r="3"/>
+    <circle cx="206" cy="188" r="3"/>
+    <circle cx="120" cy="40"  r="2.5"/>
+    <circle cx="40"  cy="128" r="2.5"/>
+    <circle cx="216" cy="148" r="2.5"/>
+  </g>
+
+  <!-- Routing arrow that cuts diagonally through the tile -->
+  <g stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" fill="none">
+    <path d="M44 200 L92 152" stroke-dasharray="2 7"/>
+    <path d="M168 104 L212 60" stroke-dasharray="2 7"/>
+  </g>
+
+  <!-- Stylised "R" mark, body 96px wide, weight 24px -->
+  <g fill="#FFFFFF">
+    <!-- left vertical stroke -->
+    <rect x="78" y="60" width="24" height="136" rx="4"/>
+    <!-- bowl: outer arc + inner cut to make a shape -->
+    <path d="M102 60
+             h44
+             a40 40 0 0 1 0 80
+             h-44
+             v-24
+             h44
+             a16 16 0 0 0 0 -32
+             h-44
+             z"/>
+    <!-- diagonal leg ending in an arrow head, doubles as the routing motif -->
+    <path d="M138 138
+             L182 196
+             L162 196
+             L162 184
+             L150 184
+             Z"/>
+  </g>
+
+  <!-- Node dot at the bowl-leg junction, ties the R to the routing graphic -->
+  <circle cx="138" cy="138" r="6" fill="#9277E5" stroke="#FFFFFF" stroke-width="3"/>
+</svg>

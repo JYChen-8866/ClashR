@@ -143,7 +143,7 @@ impl AppLayout {
 }
 
 impl Render for AppLayout {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current_page;
 
         let menu_items: Vec<SidebarMenuItem> = Page::all()
@@ -169,25 +169,79 @@ impl Render for AppLayout {
             })
             .collect();
 
-        // Two-column layout: sidebar + content
-        h_flex()
-            .size_full()
+        let toggle_button = div()
+            .id("sidebar-toggle")
+            .cursor_pointer()
+            .p_1()
+            .rounded_md()
+            .hover(|this| this.bg(cx.theme().muted))
+            .child(
+                gpui_component::Icon::new(if self.sidebar_collapsed {
+                    IconName::PanelLeft
+                } else {
+                    IconName::PanelLeftClose
+                })
+                .size_4()
+                .text_color(cx.theme().muted_foreground),
+            )
+            .on_click(cx.listener(|this, _e, _w, cx| this.toggle_sidebar(cx)));
+
+        let (status_label, status_color) = self.status_label();
+        let (up, down) = self.home_page.read(cx).speeds();
+
+        // Title bar:
+        //   left  → sidebar toggle (placed after the macOS traffic-light
+        //           padding the TitleBar already inserts)
+        //   right → core status dot + label, traffic counters
+        // Empty middle stays draggable for moving the window.
+        let title_bar = TitleBar::new().child(
+            h_flex()
+                .h_full()
+                .w_full()
+                .items_center()
+                .px_2()
+                .gap_3()
+                .child(toggle_button)
+                .child(div().flex_1())
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .child(div().size(px(7.)).rounded_full().bg(status_color))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(status_label),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("↑ {}", up))
+                        .child(format!("↓ {}", down)),
+                ),
+        );
+
+        // Body: sidebar + content. Sits below the TitleBar.
+        let body = h_flex()
+            .flex_1()
+            .min_h_0()
             .bg(cx.theme().background)
             .child(
-                // Left: sidebar
                 Sidebar::new("main-sidebar")
                     .collapsible(SidebarCollapsible::Icon)
                     .collapsed(self.sidebar_collapsed)
                     .w(px(200.))
-                    .header(div().bg(gpui::yellow()).h(px(36.)))
-                    .pt(px(36.))
                     .header(
                         SidebarHeader::new().child(
                             h_flex()
                                 .items_center()
                                 .gap_2()
                                 .child(
-                                    img("icons/app-icon.png")
+                                    img("icons/app-icon.svg")
                                         .size_8()
                                         .flex_shrink_0()
                                         .rounded(cx.theme().radius),
@@ -213,76 +267,14 @@ impl Render for AppLayout {
                     .child(
                         SidebarGroup::new(crate::i18n::t("nav.navigation"))
                             .child(SidebarMenu::new().children(menu_items)),
-                    )
-                    .footer(
-                        SidebarFooter::new().child(
-                            v_flex()
-                                .w_full()
-                                .gap_1()
-                                .child({
-                                    let (label, color) = self.status_label();
-                                    h_flex()
-                                        .gap_1p5()
-                                        .items_center()
-                                        .child(div().size(px(7.)).rounded_full().bg(color))
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(label),
-                                        )
-                                })
-                                .child({
-                                    let (up, down) = self.home_page.read(cx).speeds();
-                                    h_flex()
-                                        .gap_2()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{} ↑", up))
-                                        .child(format!("{} ↓", down))
-                                }),
-                        ),
                     ),
             )
             .child(
-                // Right: main content with collapse button
                 v_flex()
                     .flex_1()
                     .h_full()
                     .min_w_0()
                     .child(
-                        // Top bar with collapse button
-                        div()
-                            .w_full()
-                            .h(px(40.))
-                            .px_3()
-                            .flex()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div()
-                                    .id("sidebar-toggle")
-                                    .cursor_pointer()
-                                    .p_1()
-                                    .rounded_md()
-                                    .hover(|this| this.bg(cx.theme().muted))
-                                    .child(
-                                        gpui_component::Icon::new(if self.sidebar_collapsed {
-                                            IconName::PanelLeft
-                                        } else {
-                                            IconName::PanelLeftClose
-                                        })
-                                        .size_4()
-                                        .text_color(cx.theme().muted_foreground),
-                                    )
-                                    .on_click(
-                                        cx.listener(|this, _e, _w, cx| this.toggle_sidebar(cx)),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        // Main content
                         div()
                             .flex_1()
                             .min_h_0()
@@ -304,6 +296,12 @@ impl Render for AppLayout {
                                 Page::Logs => div().size_full().child(self.logs_page.clone()),
                             }),
                     ),
-            )
+            );
+
+        v_flex()
+            .size_full()
+            .bg(cx.theme().background)
+            .child(title_bar)
+            .child(body)
     }
 }
