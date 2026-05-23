@@ -43,6 +43,13 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("nav.home", "Home");
     m.insert("nav.proxies", "Proxies");
     m.insert("nav.profiles", "Profiles");
+    // Profiles page
+    m.insert("profile.import", "Import");
+    m.insert("profile.import_title", "Import Profile");
+    m.insert("profile.name", "Name");
+    m.insert("profile.url", "URL");
+    m.insert("profile.active", "Active");
+    m.insert("profile.empty_hint", "Click \"Import\" to add a subscription URL");
     m.insert("nav.connections", "Connections");
     m.insert("nav.rules", "Rules");
     m.insert("nav.logs", "Logs");
@@ -127,6 +134,13 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("nav.home", "主页");
     m.insert("nav.proxies", "代理");
     m.insert("nav.profiles", "订阅");
+    // Profiles page
+    m.insert("profile.import", "导入");
+    m.insert("profile.import_title", "导入订阅");
+    m.insert("profile.name", "名称");
+    m.insert("profile.url", "订阅链接");
+    m.insert("profile.active", "已激活");
+    m.insert("profile.empty_hint", "点击「导入」添加订阅链接");
     m.insert("nav.connections", "连接");
     m.insert("nav.rules", "规则");
     m.insert("nav.logs", "日志");

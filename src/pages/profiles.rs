@@ -157,7 +157,7 @@ impl ProfilesPage {
             let entity_clone = entity.clone();
 
             dialog
-                .title("Import Profile")
+                .title(crate::i18n::t("profile.import_title"))
                 .child(
                     v_flex()
                         .gap_3()
@@ -334,7 +334,7 @@ impl ProfilesPage {
                     v_flex()
                         .gap_3()
                         .p_4()
-                        .child(div().text_sm().child("Name"))
+                        .child(div().text_sm().child(crate::i18n::t("profile.name")))
                         .child(Input::new(&edit_desc))
                         .child(div().text_sm().child("Subscription URL"))
                         .child(Input::new(&edit_url))
@@ -536,7 +536,7 @@ impl ProfilesPage {
                                         .text_xs()
                                         .font_weight(FontWeight::MEDIUM)
                                         .flex_shrink_0()
-                                        .child("Active"),
+                                        .child(crate::i18n::t("profile.active")),
                                 )
                             }),
                     )
@@ -661,7 +661,7 @@ impl Render for ProfilesPage {
                         h_flex().gap_3().items_center()
                             .child(
                                 Button::new("import-btn")
-                                    .label("Import")
+                                    .label(crate::i18n::t("profile.import"))
                                     .icon(IconName::Plus)
                                     .on_click(cx.listener(Self::show_import_dialog)),
                             ),
@@ -684,7 +684,7 @@ impl Render for ProfilesPage {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Click \"Import\" to add a subscription URL"),
+                                .child(crate::i18n::t("profile.empty_hint")),
                         ),
                 )
             })
