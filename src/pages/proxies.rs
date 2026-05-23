@@ -170,7 +170,7 @@ fn service_icon_index() -> &'static HashMap<String, String> {
     static INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
     INDEX.get_or_init(|| {
         let mut map = HashMap::new();
-        let icons_dir = std::env::current_dir().unwrap_or_default().join("icons");
+        let icons_dir = crate::core::paths::resources_dir().join("icons");
         let Ok(entries) = std::fs::read_dir(&icons_dir) else { return map };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -192,7 +192,7 @@ fn country_icon_index() -> &'static HashMap<String, String> {
     static INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
     INDEX.get_or_init(|| {
         let mut map = HashMap::new();
-        let dir = std::env::current_dir().unwrap_or_default().join("icons").join("country");
+        let dir = crate::core::paths::resources_dir().join("icons").join("country");
         let Ok(entries) = std::fs::read_dir(&dir) else { return map };
         for entry in entries.flatten() {
             let path = entry.path();

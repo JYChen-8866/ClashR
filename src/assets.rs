@@ -15,9 +15,7 @@ pub struct CombinedAssets {
 
 impl CombinedAssets {
     pub fn new() -> Self {
-        let icons_dir = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("icons");
+        let icons_dir = crate::core::paths::resources_dir().join("icons");
         Self { icons_dir }
     }
 }
