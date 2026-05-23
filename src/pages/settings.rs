@@ -131,6 +131,16 @@ impl SettingsPage {
         cx.notify();
     }
 
+    fn open_core_dir(&self) {
+        let dir = crate::core::paths::bin_dir();
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&dir).spawn();
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+    }
+
     fn install_helper(&mut self, cx: &mut Context<Self>) {
         info!("user requested helper service install");
         cx.spawn(async move |entity, cx| {
@@ -214,6 +224,14 @@ impl Render for SettingsPage {
                             .compact()
                             .ghost()
                             .on_click(cx.listener(|this, _e, w, cx| this.stop_core(w, cx))),
+                    )
+                    .child(
+                        Button::new("open-core-dir-btn")
+                            .label(crate::i18n::t("settings.open_core_dir"))
+                            .icon(IconName::Folder)
+                            .compact()
+                            .ghost()
+                            .on_click(cx.listener(|this, _e, _w, _cx| this.open_core_dir())),
                     )
                     .into_any_element(),
             ))

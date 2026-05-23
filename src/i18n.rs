@@ -80,6 +80,7 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("settings.clash_core", "Clash Core");
     m.insert("settings.restart_core", "Restart Core");
     m.insert("settings.stop_core", "Stop Core");
+    m.insert("settings.open_core_dir", "Open Core Directory");
     m.insert("settings.install_helper", "Install Helper");
     m.insert("settings.uninstall_helper", "Uninstall Helper");
     m.insert("settings.svc_running", "Installed and running");
@@ -160,6 +161,7 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("settings.clash_core", "内核管理");
     m.insert("settings.restart_core", "重启内核");
     m.insert("settings.stop_core", "停止内核");
+    m.insert("settings.open_core_dir", "打开核心目录");
     m.insert("settings.install_helper", "安装服务");
     m.insert("settings.uninstall_helper", "卸载服务");
     m.insert("settings.svc_running", "已安装，运行中");
