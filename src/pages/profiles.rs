@@ -375,15 +375,25 @@ impl ProfilesPage {
         self.persist();
         cx.notify();
 
-        // If we deleted the active profile, activate the new current one
-        // so mihomo reloads with the correct config.
+        // If we deleted the active profile, activate the next one or clear nodes
         if was_active {
             if let Some(new_uid) = self.current_uid.clone() {
+                // Switch to next profile
                 cx.spawn(async move |_e, _cx| {
                     let _ = crate::runtime::spawn_on_tokio(async move {
                         let mgr = crate::core::CoreManager::global();
                         let _ = mgr.activate_profile(&new_uid);
                         let _ = mgr.reload_config().await;
+                    }).await;
+                }).detach();
+            } else {
+                // No profiles left — write a minimal config with no proxies
+                // and reload so the proxy list clears immediately.
+                cx.spawn(async move |_e, _cx| {
+                    let _ = crate::runtime::spawn_on_tokio(async move {
+                        let empty = "mixed-port: 7890\nexternal-controller: 127.0.0.1:9090\nmode: rule\nlog-level: info\n";
+                        let _ = std::fs::write(crate::core::paths::runtime_yaml_path(), empty);
+                        let _ = crate::core::CoreManager::global().reload_config().await;
                     }).await;
                 }).detach();
             }
