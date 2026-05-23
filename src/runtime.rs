@@ -37,3 +37,14 @@ where
             .expect("clashr tokio task was cancelled or panicked")
     }
 }
+
+/// Fire-and-forget: spawn a long-running future on the global tokio
+/// runtime without waiting for its result. Use this for tasks that run
+/// for the lifetime of the app (e.g. WebSocket readers) where you want
+/// to avoid creating a second tokio runtime.
+pub fn spawn_tokio_task<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    runtime().spawn(future);
+}

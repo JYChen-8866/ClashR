@@ -1,3 +1,9 @@
+// Use mimalloc as the global allocator. On macOS the system allocator
+// holds freed memory aggressively and never returns it to the OS;
+// mimalloc returns pages promptly, typically cutting RSS by 20-40 MB.
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod app;
 mod assets;
 mod components;

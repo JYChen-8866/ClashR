@@ -37,6 +37,7 @@ tracing-appender = "0.2"
 tokio.workspace = true
 once_cell.workspace = true
 urlencoding = "2"
+mimalloc = { version = "0.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
@@ -45,3 +46,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_Networking_WinInet",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[profile.release]
+opt-level = "z"      # optimize for size, collapses monomorphized duplicates
+lto = "fat"          # whole-program dead-code elimination (slower compile)
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

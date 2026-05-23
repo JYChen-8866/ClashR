@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use futures_util::StreamExt;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, StyledExt as _, h_flex, v_flex,
@@ -8,9 +9,9 @@ use gpui_component::{
 };
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::StreamExt;
 
 use crate::i18n::t;
+use crate::runtime::spawn_tokio_task;
 
 const MIHOMO_WS: &str = "ws://127.0.0.1:9090/logs";
 const MAX_LOGS: usize = 500;
@@ -23,46 +24,79 @@ struct LogEntry {
 }
 
 pub struct LogsPage {
-    logs: Arc<Mutex<VecDeque<LogEntry>>>,
+    logs: VecDeque<LogEntry>,
     auto_scroll: bool,
+    // Written by the tokio WebSocket task, drained by the gpui poll loop.
+    // std::sync::Mutex so both sides can lock without an async context.
+    incoming: Arc<Mutex<Vec<LogEntry>>>,
 }
 
 impl LogsPage {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let logs = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_LOGS)));
-        let logs_clone = logs.clone();
+        let incoming = Arc::new(Mutex::new(Vec::<LogEntry>::new()));
+        let incoming_writer = incoming.clone();
 
-        // Spawn WebSocket reader in background thread with its own tokio runtime
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                loop {
-                    match connect_async(MIHOMO_WS).await {
-                        Ok((ws_stream, _)) => {
-                            let (_, mut read) = ws_stream.split();
-                            while let Some(msg) = read.next().await {
-                                if let Ok(Message::Text(text)) = msg {
-                                    if let Ok(entry) = serde_json::from_str::<LogEntry>(&text) {
-                                        let mut logs = logs_clone.lock().unwrap();
-                                        if logs.len() >= MAX_LOGS {
-                                            logs.pop_front();
-                                        }
-                                        logs.push_back(entry);
-                                    }
-                                }
+        // WebSocket reader on the shared tokio runtime — no extra thread
+        // or runtime needed (previously this spawned its own Runtime).
+        spawn_tokio_task(async move {
+            loop {
+                match connect_async(MIHOMO_WS).await {
+                    Ok((ws, _)) => {
+                        let (_, mut read) = ws.split();
+                        while let Some(Ok(Message::Text(text))) = read.next().await {
+                            if let Ok(entry) = serde_json::from_str::<LogEntry>(&text) {
+                                incoming_writer.lock().unwrap().push(entry);
                             }
                         }
-                        Err(_) => {
-                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        }
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     }
                 }
-            });
+            }
         });
 
+        // Drain the incoming queue into page state every 200 ms.
+        let incoming_reader = incoming.clone();
+        cx.spawn(async move |entity, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(200))
+                .await;
+
+            let batch: Vec<LogEntry> = {
+                let mut q = incoming_reader.lock().unwrap();
+                std::mem::take(&mut *q)
+            };
+            if batch.is_empty() {
+                continue;
+            }
+
+            let alive = cx.update(|cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |this: &mut LogsPage, cx| {
+                        for entry in batch {
+                            if this.logs.len() >= MAX_LOGS {
+                                this.logs.pop_front();
+                            }
+                            this.logs.push_back(entry);
+                        }
+                        cx.notify();
+                    });
+                    true
+                } else {
+                    false
+                }
+            });
+            if !alive {
+                return;
+            }
+        })
+        .detach();
+
         Self {
-            logs,
+            logs: VecDeque::with_capacity(MAX_LOGS),
             auto_scroll: true,
+            incoming,
         }
     }
 
@@ -72,22 +106,20 @@ impl LogsPage {
     }
 
     fn clear_logs(&mut self, cx: &mut Context<Self>) {
-        self.logs.lock().unwrap().clear();
+        self.logs.clear();
         cx.notify();
     }
 }
 
 impl Render for LogsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let logs = self.logs.lock().unwrap().iter().cloned().collect::<Vec<_>>();
+        let logs = &self.logs;
 
         let header = h_flex()
             .w_full()
             .gap_3()
             .items_center()
-            .child(
-                div().font_bold().text_lg().child(t("nav.logs").to_string()),
-            )
+            .child(div().font_bold().text_lg().child(t("nav.logs").to_string()))
             .child(
                 div()
                     .text_xs()
@@ -119,7 +151,6 @@ impl Render for LogsPage {
                 "info" => cx.theme().muted_foreground,
                 _ => cx.theme().foreground,
             };
-
             h_flex()
                 .w_full()
                 .px_2()
