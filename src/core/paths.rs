@@ -28,9 +28,13 @@ pub fn runtime_yaml_path() -> PathBuf {
 
 /// Where to look for the mihomo binary, in priority order.
 ///
-/// 1. `MIHOMO_PATH` env var
-/// 2. `./mihomo` next to ClashR's working dir
-/// 3. `mihomo` resolved from PATH
+/// 1. `MIHOMO_PATH` env var (override for testing)
+/// 2. `<exe-dir>/mihomo` — bundled next to the main app binary
+/// 3. `<exe-dir>/../Resources/bin/mihomo` — alternative .app layout
+/// 4. `<cwd>/bin/mihomo` — in-tree stable location, committed so the
+///    project is self-contained and runnable on a fresh checkout
+/// 5. `<cwd>/mihomo` — legacy fallback for older layouts
+/// 6. `mihomo` resolved from `PATH`
 pub fn locate_mihomo() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MIHOMO_PATH") {
         let path = PathBuf::from(p);
@@ -39,11 +43,26 @@ pub fn locate_mihomo() -> Option<PathBuf> {
         }
     }
 
-    let local = data_dir().parent()
-        .map(|p| p.join("mihomo"))
-        .filter(|p| p.is_file());
-    if let Some(p) = local {
-        return Some(p);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("mihomo");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+            let resources = parent.join("..").join("Resources").join("bin").join("mihomo");
+            if resources.is_file() {
+                return Some(resources);
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        for rel in ["bin/mihomo", "mihomo"] {
+            let p = cwd.join(rel);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
     }
 
     which("mihomo")

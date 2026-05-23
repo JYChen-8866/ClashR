@@ -22,6 +22,10 @@ pub fn install() -> Result<()> {
     require_root()?;
 
     let exe = std::env::current_exe().context("locate current exe")?;
+    // Resolve any `..` segments / symlinks so the plist contains a clean
+    // absolute path. Falls back to the raw path if canonicalize fails
+    // (e.g. on filesystems that don't support it).
+    let exe = exe.canonicalize().unwrap_or(exe);
     let exe_str = exe.to_string_lossy();
 
     let plist = format!(

@@ -77,9 +77,11 @@ struct IpInfo {
     city: Option<String>,
     #[serde(default)]
     region: Option<String>,
-    #[serde(default)]
+    // ipinfo.io → "country" (ISO code); ipapi.co → "country_name"; ip.sb → "country" (full name)
+    #[serde(default, alias = "country_name")]
     country: Option<String>,
-    #[serde(default)]
+    // ipinfo.io → "org"; ip.sb → "asn_organization" or "isp"; ipapi.co → "org"
+    #[serde(default, alias = "asn_organization", alias = "isp", alias = "organization")]
     org: Option<String>,
     #[serde(default)]
     timezone: Option<String>,
@@ -1190,12 +1192,34 @@ async fn fetch_ip_info() -> anyhow::Result<IpInfo> {
         .timeout(Duration::from_secs(8))
         .build()?;
 
-    let resp = client.get("https://ipinfo.io/json").send().await?;
-    if !resp.status().is_success() {
-        anyhow::bail!("HTTP {}", resp.status());
+    // Try multiple providers in order. ipinfo.io has a strict free tier
+    // (50k/month per IP, easy to trip when sharing a proxy egress IP and
+    // returning 429 too many requests), so we lead with looser providers
+    // and fall back through the list. First successful JSON parse wins.
+    const ENDPOINTS: &[&str] = &[
+        "https://api.ip.sb/geoip",
+        "https://ipapi.co/json/",
+        "https://ipinfo.io/json",
+    ];
+
+    let mut last_err: Option<anyhow::Error> = None;
+    for url in ENDPOINTS {
+        match client.get(*url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if !status.is_success() {
+                    last_err = Some(anyhow::anyhow!("{} → HTTP {}", url, status));
+                    continue;
+                }
+                match resp.json::<IpInfo>().await {
+                    Ok(info) => return Ok(info),
+                    Err(e) => last_err = Some(anyhow::anyhow!("{} → parse: {}", url, e)),
+                }
+            }
+            Err(e) => last_err = Some(anyhow::anyhow!("{} → {}", url, e)),
+        }
     }
-    let info: IpInfo = resp.json().await?;
-    Ok(info)
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no IP info endpoint succeeded")))
 }
 
 /// Fetch the current proxy mode (`rule|global|direct`), the GLOBAL group's

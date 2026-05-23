@@ -12,10 +12,17 @@ use anyhow::{Context, Result, bail};
 /// Locate the `clashr-service` binary.
 ///
 /// Priority:
-///   1. `CLASHR_SERVICE_PATH` env var
-///   2. Same directory as the running ClashR binary
-///   3. `<cwd>/target/release/clashr-service` (dev convenience)
-///   4. `<cwd>/target/debug/clashr-service`
+///   1. `CLASHR_SERVICE_PATH` env var (override for testing)
+///   2. `<exe-dir>/clashr-service` — the canonical bundled location.
+///      In a macOS .app, that means `Contents/MacOS/clashr-service` next
+///      to the main app binary.
+///   3. `<exe-dir>/../Resources/bin/clashr-service` — alternative bundle
+///      layout (Resources/bin/ inside .app).
+///   4. `<cwd>/bin/clashr-service` — the in-tree stable location used
+///      during development; this file is committed so other devs can
+///      run the app without a fresh build of the service crate.
+///   5. `<cwd>/target/release/clashr-service` (dev convenience)
+///   6. `<cwd>/target/debug/clashr-service`
 pub fn locate_service_binary() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("CLASHR_SERVICE_PATH") {
         let path = PathBuf::from(p);
@@ -29,10 +36,20 @@ pub fn locate_service_binary() -> Option<PathBuf> {
             if candidate.is_file() {
                 return Some(candidate);
             }
+            // Inside a .app, `Contents/MacOS/<exe>` and the resources we
+            // ship live one level up.
+            let resources_candidate = parent.join("..").join("Resources").join("bin").join("clashr-service");
+            if resources_candidate.is_file() {
+                return Some(resources_candidate);
+            }
         }
     }
     let cwd = std::env::current_dir().ok()?;
-    for rel in ["target/release/clashr-service", "target/debug/clashr-service"] {
+    for rel in [
+        "bin/clashr-service",
+        "target/release/clashr-service",
+        "target/debug/clashr-service",
+    ] {
         let p = cwd.join(rel);
         if p.is_file() {
             return Some(p);

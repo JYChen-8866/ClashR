@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -85,11 +84,10 @@ fn country_emoji_for_name(raw: &str) -> Option<&'static str> {
     None
 }
 
-/// Static keyword aliases — pointing extra names (English / emoji / abbrev.)
-/// to the same icon stem we already have a file for.
-fn aliases() -> &'static [(&'static str, &'static str)] {
+/// Service brand aliases — extra keywords (English / abbrev.) that point
+/// to the same Chinese-stemmed file under `icons/`.
+fn service_aliases() -> &'static [(&'static str, &'static str)] {
     &[
-        // 服务别名 → 文件名 stem
         ("apple", "苹果"),
         ("icloud", "苹果"),
         ("appstore", "苹果"),
@@ -111,78 +109,113 @@ fn aliases() -> &'static [(&'static str, &'static str)] {
         ("telegram", "电报"),
         ("tg", "电报"),
         ("whatsapp", "WhatsApp"),
-
-        // 国家/地区
-        ("hk", "香港"),
-        ("hong kong", "香港"),
-        ("hongkong", "香港"),
-        ("🇭🇰", "香港"),
-        ("us", "美国"),
-        ("usa", "美国"),
-        ("united states", "美国"),
-        ("🇺🇸", "美国"),
-        ("uk", "英国"),
-        ("england", "英国"),
-        ("british", "英国"),
-        ("🇬🇧", "英国"),
-        ("vn", "越南"),
-        ("vietnam", "越南"),
-        ("🇻🇳", "越南"),
-        ("ca", "加拿大"),
-        ("canada", "加拿大"),
-        ("🇨🇦", "加拿大"),
-        ("de", "德国"),
-        ("germany", "德国"),
-        ("🇩🇪", "德国"),
-        ("sg", "新加坡"),
-        ("singapore", "新加坡"),
-        ("🇸🇬", "新加坡"),
-        ("jp", "日本"),
-        ("japan", "日本"),
-        ("🇯🇵", "日本"),
     ]
 }
 
-/// stem → asset path (e.g. "苹果" → "service-icons/苹果.svg")
-fn icon_index() -> &'static HashMap<String, String> {
+/// Country/region aliases → ISO 3166-1 alpha-2 file stem (e.g. "香港" → "hk",
+/// matching `icons/country/hk.svg`).
+///
+/// Country flags are reachable ONLY through this table, never through the
+/// substring-match path used for service icons — two-letter ISO codes would
+/// otherwise produce false positives on common words ("discord" contains
+/// "is", which is Iceland; "studio" contains "tu", etc.).
+fn country_aliases() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("hk", "hk"), ("香港", "hk"), ("hong kong", "hk"), ("hongkong", "hk"), ("🇭🇰", "hk"),
+        ("us", "us"), ("usa", "us"), ("美国", "us"), ("united states", "us"), ("🇺🇸", "us"),
+        ("uk", "gb"), ("gb", "gb"), ("英国", "gb"), ("england", "gb"), ("british", "gb"), ("🇬🇧", "gb"),
+        ("vn", "vn"), ("越南", "vn"), ("vietnam", "vn"), ("🇻🇳", "vn"),
+        ("ca", "ca"), ("加拿大", "ca"), ("canada", "ca"), ("🇨🇦", "ca"),
+        ("de", "de"), ("德国", "de"), ("germany", "de"), ("🇩🇪", "de"),
+        ("sg", "sg"), ("新加坡", "sg"), ("singapore", "sg"), ("🇸🇬", "sg"),
+        ("jp", "jp"), ("日本", "jp"), ("japan", "jp"), ("🇯🇵", "jp"),
+        ("tw", "tw"), ("台湾", "tw"), ("台灣", "tw"), ("taiwan", "tw"), ("🇹🇼", "tw"),
+        ("kr", "kr"), ("韩国", "kr"), ("韓國", "kr"), ("korea", "kr"), ("🇰🇷", "kr"),
+        ("fr", "fr"), ("法国", "fr"), ("france", "fr"), ("🇫🇷", "fr"),
+        ("ru", "ru"), ("俄罗斯", "ru"), ("俄国", "ru"), ("russia", "ru"), ("🇷🇺", "ru"),
+        ("au", "au"), ("澳大利亚", "au"), ("澳洲", "au"), ("australia", "au"), ("🇦🇺", "au"),
+        ("in", "in"), ("印度", "in"), ("india", "in"), ("🇮🇳", "in"),
+        ("nl", "nl"), ("荷兰", "nl"), ("netherlands", "nl"), ("🇳🇱", "nl"),
+        ("th", "th"), ("泰国", "th"), ("thailand", "th"), ("🇹🇭", "th"),
+        ("my", "my"), ("马来西亚", "my"), ("malaysia", "my"), ("🇲🇾", "my"),
+        ("ph", "ph"), ("菲律宾", "ph"), ("philippines", "ph"), ("🇵🇭", "ph"),
+        ("id", "id"), ("印尼", "id"), ("印度尼西亚", "id"), ("indonesia", "id"), ("🇮🇩", "id"),
+        ("tr", "tr"), ("土耳其", "tr"), ("turkey", "tr"), ("🇹🇷", "tr"),
+        ("br", "br"), ("巴西", "br"), ("brazil", "br"), ("🇧🇷", "br"),
+        ("ar", "ar"), ("阿根廷", "ar"), ("argentina", "ar"), ("🇦🇷", "ar"),
+        ("it", "it"), ("意大利", "it"), ("italy", "it"), ("🇮🇹", "it"),
+        ("es", "es"), ("西班牙", "es"), ("spain", "es"), ("🇪🇸", "es"),
+        ("ch", "ch"), ("瑞士", "ch"), ("switzerland", "ch"), ("🇨🇭", "ch"),
+        ("se", "se"), ("瑞典", "se"), ("sweden", "se"), ("🇸🇪", "se"),
+        ("no", "no"), ("挪威", "no"), ("norway", "no"), ("🇳🇴", "no"),
+        ("fi", "fi"), ("芬兰", "fi"), ("finland", "fi"), ("🇫🇮", "fi"),
+        ("dk", "dk"), ("丹麦", "dk"), ("denmark", "dk"), ("🇩🇰", "dk"),
+        ("ie", "ie"), ("爱尔兰", "ie"), ("ireland", "ie"), ("🇮🇪", "ie"),
+        ("at", "at"), ("奥地利", "at"), ("austria", "at"), ("🇦🇹", "at"),
+        ("be", "be"), ("比利时", "be"), ("belgium", "be"), ("🇧🇪", "be"),
+        ("pt", "pt"), ("葡萄牙", "pt"), ("portugal", "pt"), ("🇵🇹", "pt"),
+        ("nz", "nz"), ("新西兰", "nz"), ("new zealand", "nz"), ("🇳🇿", "nz"),
+        ("ae", "ae"), ("阿联酋", "ae"), ("uae", "ae"), ("🇦🇪", "ae"),
+        ("za", "za"), ("南非", "za"), ("south africa", "za"), ("🇿🇦", "za"),
+        ("mx", "mx"), ("墨西哥", "mx"), ("mexico", "mx"), ("🇲🇽", "mx"),
+        ("cn", "cn"), ("中国", "cn"), ("china", "cn"), ("🇨🇳", "cn"),
+        ("mo", "mo"), ("澳门", "mo"), ("macau", "mo"), ("🇲🇴", "mo"),
+    ]
+}
+
+/// Service icons live at the root of `icons/` (e.g. `icons/苹果.svg`,
+/// `icons/github.svg`). Stems are matched by direct substring against the
+/// proxy/group name.
+fn service_icon_index() -> &'static HashMap<String, String> {
     static INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
     INDEX.get_or_init(|| {
         let mut map = HashMap::new();
-        let icons_dir = std::env::current_dir()
-            .unwrap_or_default()
-            .join("icons");
-        scan_dir(&icons_dir, "service-icons", &mut map);
+        let icons_dir = std::env::current_dir().unwrap_or_default().join("icons");
+        let Ok(entries) = std::fs::read_dir(&icons_dir) else { return map };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Skip subdirectories (country flags + app icons live elsewhere).
+            if !path.is_file() { continue; }
+            if path.extension().and_then(|e| e.to_str()) != Some("svg") { continue; }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                map.insert(stem.to_lowercase(), format!("service-icons/{}.svg", stem));
+            }
+        }
         map
     })
 }
 
-fn scan_dir(dir: &Path, prefix: &str, out: &mut HashMap<String, String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            let new_prefix = format!("{}/{}", prefix, name);
-            scan_dir(&path, &new_prefix, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("svg") {
+/// Country flag icons live under `icons/country/` (e.g. `icons/country/hk.svg`).
+/// Reachable only through `country_aliases()` to avoid spurious 2-letter
+/// substring hits.
+fn country_icon_index() -> &'static HashMap<String, String> {
+    static INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut map = HashMap::new();
+        let dir = std::env::current_dir().unwrap_or_default().join("icons").join("country");
+        let Ok(entries) = std::fs::read_dir(&dir) else { return map };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            if path.extension().and_then(|e| e.to_str()) != Some("svg") { continue; }
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                let asset = format!("{}/{}.svg", prefix, stem);
-                out.insert(stem.to_lowercase(), asset);
+                map.insert(stem.to_lowercase(), format!("service-icons/country/{}.svg", stem));
             }
         }
-    }
+        map
+    })
 }
 
 /// Try to find an icon for a group/node name. Matching strategy:
-/// 1. Direct: name lowercased contains any registered file stem
-/// 2. Aliases: name contains an alias keyword → resolve to its target stem
+/// 1. Direct: lowercased name contains a service-icon stem (brands like
+///    "github", "youtube", or Chinese stems like "苹果").
+/// 2. Service aliases: keyword in name → service-icon stem.
+/// 3. Country aliases: keyword in name → ISO-2 stem under `country/`.
 /// Returns the asset path (loadable via `service-icons/...`) or None.
 fn service_icon_for_name(raw: &str) -> Option<&'static str> {
-    // Cache lookup results to avoid repeated expensive searches
     static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Option<&'static str>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
 
-    // Check cache first
     {
         let cache_guard = cache.lock().unwrap();
         if let Some(cached) = cache_guard.get(raw) {
@@ -190,40 +223,38 @@ fn service_icon_for_name(raw: &str) -> Option<&'static str> {
         }
     }
 
-    let index = icon_index();
-    if index.is_empty() {
-        let mut cache_guard = cache.lock().unwrap();
-        cache_guard.insert(raw.to_string(), None);
-        return None;
-    }
     let lower = raw.to_lowercase();
+    let svc = service_icon_index();
+    let country = country_icon_index();
 
-    // Direct stem hit (works for Chinese stems like "苹果").
-    for (stem, path) in index {
-        if lower.contains(stem) {
-            // SAFETY: paths in the index live for the program lifetime.
-            let result = string_to_static(path);
-            let mut cache_guard = cache.lock().unwrap();
-            cache_guard.insert(raw.to_string(), Some(result));
-            return Some(result);
-        }
-    }
-
-    // Alias hit — keyword in `raw`, target a known stem.
-    for (keyword, target) in aliases() {
-        if lower.contains(&keyword.to_lowercase()) || raw.contains(keyword) {
-            if let Some(path) = index.get(&target.to_lowercase()) {
-                let result = string_to_static(path);
-                let mut cache_guard = cache.lock().unwrap();
-                cache_guard.insert(raw.to_string(), Some(result));
-                return Some(result);
+    let resolved: Option<&'static str> = (|| {
+        // 1) Direct service stem hit.
+        for (stem, path) in svc {
+            if lower.contains(stem) {
+                return Some(string_to_static(path));
             }
         }
-    }
+        // 2) Service alias hit.
+        for (keyword, target) in service_aliases() {
+            if lower.contains(&keyword.to_lowercase()) || raw.contains(keyword) {
+                if let Some(path) = svc.get(&target.to_lowercase()) {
+                    return Some(string_to_static(path));
+                }
+            }
+        }
+        // 3) Country alias hit.
+        for (keyword, target) in country_aliases() {
+            if lower.contains(&keyword.to_lowercase()) || raw.contains(keyword) {
+                if let Some(path) = country.get(&target.to_lowercase()) {
+                    return Some(string_to_static(path));
+                }
+            }
+        }
+        None
+    })();
 
-    let mut cache_guard = cache.lock().unwrap();
-    cache_guard.insert(raw.to_string(), None);
-    None
+    cache.lock().unwrap().insert(raw.to_string(), resolved);
+    resolved
 }
 
 /// `OnceLock<HashMap>` lives forever; convert &String into &'static str.
