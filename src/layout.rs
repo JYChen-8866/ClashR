@@ -377,9 +377,7 @@ impl Render for AppLayout {
                                         .gap_2()
                                         .child(
                                             img(crate::core::paths::resources_dir()
-                                                .join("icons/app/app-icon.svg")
-                                                .to_string_lossy()
-                                                .to_string())
+                                                .join("icons/app/app-icon.svg"))
                                                 .size_8()
                                                 .flex_shrink_0()
                                                 .rounded(cx.theme().radius),

@@ -29,7 +29,7 @@ impl SystemTray {
         tray_menu.append(&quit_item)?;
 
         // Load and resize icon
-        let icon_bytes = include_bytes!("../icons/app/app-icon.png");
+        let icon_bytes = include_bytes!("../icons/app/app-icon-256.png");
         let icon_image = image::load_from_memory(icon_bytes)?;
         let icon_rgba = icon_image.resize_exact(32, 32, image::imageops::FilterType::Lanczos3).to_rgba8();
         let (width, height) = (icon_rgba.width(), icon_rgba.height());
