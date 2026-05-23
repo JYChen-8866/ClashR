@@ -254,16 +254,22 @@ impl Render for AppLayout {
         // The colour seam itself acts as the divider, which lines up with
         // the sidebar's right edge perfectly without us drawing an extra
         // border (an extra line read as too dark in dark themes).
+        //
+        // Outer bg is platform-conditional: on macOS the lib reserves
+        // ~80px on the left for traffic lights and we want that area to
+        // paint in sidebar bg. On Windows/Linux the lib appends its own
+        // window-control buttons (min/max/close) on the right, and we
+        // want that area to read as content bg, so we flip the outer.
+        #[cfg(target_os = "macos")]
+        let outer_bg = cx.theme().sidebar;
+        #[cfg(not(target_os = "macos"))]
+        let outer_bg = cx.theme().background;
+
         let title_bar = TitleBar::new()
             // Trim the bar height a little — the lib default (34px) feels
             // bulky above a sidebar with no visible header chrome.
             .h(px(28.))
-            // Use the sidebar colour as the bar's own bg; the right
-            // segment paints over it with the page bg. The lib's default
-            // left padding (~80px on macOS) lives at the bar's left edge
-            // and inherits this bg, which gives the traffic lights a
-            // sidebar-coloured backdrop without any extra work.
-            .bg(cx.theme().sidebar)
+            .bg(outer_bg)
             // TitleBar paints a 1px bottom border by default. Override the
             // width to 0 so the seam between bar and body sits flush.
             .border_b_0()
@@ -273,15 +279,16 @@ impl Render for AppLayout {
                     .w_full()
                     .items_center()
                     .child(
-                        // Left segment — sidebar-coloured, narrower than
-                        // the sidebar by the lib's reserved left padding
-                        // (which already paints in sidebar bg above).
+                        // Left segment — sidebar-coloured. Explicit bg so
+                        // it overrides the outer when the outer is the
+                        // content colour (Windows/Linux).
                         h_flex()
                             .h_full()
                             .w(left_seg_visible_w)
                             .flex_shrink_0()
                             .items_center()
                             .pr_2()
+                            .bg(cx.theme().sidebar)
                             // Continue the sidebar's right border up through
                             // the title bar so the seam reads as one
                             // continuous vertical line.
