@@ -72,6 +72,32 @@ fn main() {
 
     let app = gpui_platform::application().with_assets(CombinedAssets::new());
 
+    // Handle reopen events (e.g., clicking Dock icon when minimized)
+    app.on_reopen(|cx| {
+        // Check if any window is already open
+        if cx.windows().is_empty() {
+            let window_options = WindowOptions {
+                window_bounds: Some(WindowBounds::centered(size(px(960.), px(680.)), cx)),
+                titlebar: Some(gpui_component::TitleBar::title_bar_options()),
+                ..Default::default()
+            };
+
+            cx.spawn(async move |cx| {
+                cx.open_window(window_options, |window, cx| {
+                    theming::apply_saved_theme_or_default(window, cx);
+                    let prefs = theming::Preferences::load();
+                    if let Some(ref lang) = prefs.language {
+                        i18n::set_locale(lang);
+                    }
+                    let view = cx.new(|cx| AppLayout::new(window, cx));
+                    cx.new(|cx| gpui_component::Root::new(view, window, cx))
+                })
+                .ok();
+            })
+            .detach();
+        }
+    });
+
     app.run(move |cx| {
         gpui_component::init(cx);
         theming::load_bundled_themes(cx);
@@ -82,18 +108,14 @@ fn main() {
             ..Default::default()
         };
 
+        // Open initial window
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
-                // Apply the user's previously selected theme (if any) before
-                // building the root view, so the first paint is correct.
                 theming::apply_saved_theme_or_default(window, cx);
-
-                // Apply saved locale.
                 let prefs = theming::Preferences::load();
                 if let Some(ref lang) = prefs.language {
                     i18n::set_locale(lang);
                 }
-
                 let view = cx.new(|cx| AppLayout::new(window, cx));
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))
             })
