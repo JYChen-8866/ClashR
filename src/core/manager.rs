@@ -102,11 +102,21 @@ impl CoreManager {
             // config to avoid route conflicts on mihomo restart.
             let tun_key = serde_yaml::Value::String("tun".into());
             if let Some(serde_yaml::Value::Mapping(ref mut tun_map)) = map.get_mut(&tun_key) {
-                // If TUN config exists, force enable to false
-                let enable_key = serde_yaml::Value::String("enable".into());
-                tun_map.insert(enable_key, serde_yaml::Value::Bool(false));
+                // Force enable=false so mihomo doesn't auto-create TUN routes
+                // on startup (avoids "file exists" on restart).
+                tun_map.insert(
+                    serde_yaml::Value::String("enable".into()),
+                    serde_yaml::Value::Bool(false),
+                );
+                // Disable auto-detect-interface: when enabled, mihomo monitors
+                // network interface changes and tries to restart TUN without
+                // first removing old routes, causing repeated "file exists"
+                // errors. We manage TUN lifecycle via API instead.
+                tun_map.insert(
+                    serde_yaml::Value::String("auto-detect-interface".into()),
+                    serde_yaml::Value::Bool(false),
+                );
             } else {
-                // If TUN config doesn't exist, create it with enable: false
                 let mut tun = serde_yaml::Mapping::new();
                 tun.insert(serde_yaml::Value::String("enable".into()), serde_yaml::Value::Bool(false));
                 tun.insert(serde_yaml::Value::String("stack".into()), serde_yaml::Value::String("gvisor".into()));
@@ -115,7 +125,7 @@ impl CoreManager {
                     serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".into())]),
                 );
                 tun.insert(serde_yaml::Value::String("auto-route".into()), serde_yaml::Value::Bool(true));
-                tun.insert(serde_yaml::Value::String("auto-detect-interface".into()), serde_yaml::Value::Bool(true));
+                tun.insert(serde_yaml::Value::String("auto-detect-interface".into()), serde_yaml::Value::Bool(false));
                 map.insert(tun_key, serde_yaml::Value::Mapping(tun));
             }
         }
@@ -187,8 +197,16 @@ impl CoreManager {
             if let serde_yaml::Value::Mapping(ref mut map) = doc {
                 let tun_key = serde_yaml::Value::String("tun".into());
                 if let Some(serde_yaml::Value::Mapping(ref mut tun_map)) = map.get_mut(&tun_key) {
+                    // Force enable=false and auto-detect-interface=false.
+                    // auto-detect-interface causes mihomo to restart TUN on
+                    // network changes without removing old routes first,
+                    // producing repeated "file exists" errors.
                     tun_map.insert(
                         serde_yaml::Value::String("enable".into()),
+                        serde_yaml::Value::Bool(false),
+                    );
+                    tun_map.insert(
+                        serde_yaml::Value::String("auto-detect-interface".into()),
                         serde_yaml::Value::Bool(false),
                     );
                 }
