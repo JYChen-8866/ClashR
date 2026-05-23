@@ -113,6 +113,7 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("rules.payload", "Payload");
     m.insert("rules.proxy", "Proxy");
     m.insert("rules.loading", "Loading rules…");
+    m.insert("rules.refresh", "Refresh");
     // Logs
     m.insert("logs.auto_scroll_on", "Auto-scroll: ON");
     m.insert("logs.auto_scroll_off", "Auto-scroll: OFF");
@@ -188,6 +189,7 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("rules.payload", "匹配内容");
     m.insert("rules.proxy", "策略");
     m.insert("rules.loading", "加载规则中…");
+    m.insert("rules.refresh", "刷新");
     m.insert("logs.auto_scroll_on", "自动滚动：开");
     m.insert("logs.auto_scroll_off", "自动滚动：关");
     m.insert("logs.clear", "清空");

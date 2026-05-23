@@ -1,8 +1,10 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::*;
+use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    ActiveTheme, StyledExt as _, VirtualListScrollHandle, h_flex, v_flex, v_virtual_list,
+    ActiveTheme, InteractiveElementExt as _, StyledExt as _, VirtualListScrollHandle, h_flex,
+    v_flex, v_virtual_list,
     button::{Button, ButtonVariants as _},
 };
 use serde::Deserialize;
@@ -58,6 +60,8 @@ pub struct ConnectionsPage {
     download_total: u64,
     upload_total: u64,
     scroll_handle: VirtualListScrollHandle,
+    /// Cell content shown in the full-text overlay; None when overlay is closed.
+    expanded: Option<String>,
 }
 
 impl ConnectionsPage {
@@ -96,6 +100,7 @@ impl ConnectionsPage {
             download_total: 0,
             upload_total: 0,
             scroll_handle: VirtualListScrollHandle::new(),
+            expanded: None,
         }
     }
 
@@ -166,9 +171,13 @@ impl Render for ConnectionsPage {
             .child(div().w(px(70.)).child("↑"))
             .child(div().w(px(70.)).child("↓"));
 
-        // Use virtual list for better performance with many connections
+        // Use virtual list for better performance with many connections.
+        // ROW_H must match the row's own .h(...) below — the virtual list
+        // positions rows by this size hint, so a too-small value here
+        // makes successive rows overlap.
+        const ROW_H: f32 = 32.;
         let item_count = self.connections.len();
-        let item_sizes = Rc::new(vec![size(px(100.), px(28.)); item_count]);
+        let item_sizes = Rc::new(vec![size(px(100.), px(ROW_H)); item_count]);
 
         let entity = cx.entity().clone();
         let body = v_virtual_list(
@@ -190,44 +199,24 @@ impl Render for ConnectionsPage {
                         } else {
                             format!("{} ({})", conn.rule, conn.rule_payload)
                         };
+                        let network = format!("{}/{}", conn.metadata.network, conn.metadata.conn_type);
+                        let process = conn.metadata.process.clone();
 
                         h_flex()
                             .w_full()
+                            .h(px(ROW_H))
+                            .flex_shrink_0()
                             .px_3()
-                            .py_1p5()
                             .gap_2()
+                            .items_center()
                             .text_xs()
                             .border_b_1()
                             .border_color(cx.theme().border.opacity(0.5))
-                            .child(
-                                div()
-                                    .w(px(200.))
-                                    .overflow_x_hidden()
-                                    .child(host),
-                            )
-                            .child(
-                                div()
-                                    .w(px(60.))
-                                    .child(format!("{}/{}", conn.metadata.network, conn.metadata.conn_type)),
-                            )
-                            .child(
-                                div()
-                                    .w(px(120.))
-                                    .overflow_x_hidden()
-                                    .child(conn.metadata.process.clone()),
-                            )
-                            .child(
-                                div()
-                                    .w(px(80.))
-                                    .overflow_x_hidden()
-                                    .child(rule_display),
-                            )
-                            .child(
-                                div()
-                                    .w(px(150.))
-                                    .overflow_x_hidden()
-                                    .child(chain),
-                            )
+                            .child(cell(cx, ("conn-host", i), px(200.), host))
+                            .child(cell(cx, ("conn-net", i), px(60.), network))
+                            .child(cell(cx, ("conn-proc", i), px(120.), process))
+                            .child(cell(cx, ("conn-rule", i), px(80.), rule_display))
+                            .child(cell(cx, ("conn-chain", i), px(150.), chain))
                             .child(div().w(px(70.)).child(format_bytes(conn.upload)))
                             .child(div().w(px(70.)).child(format_bytes(conn.download)))
                     })
@@ -239,11 +228,76 @@ impl Render for ConnectionsPage {
         v_flex()
             .id("connections-scroll")
             .size_full()
+            .relative()
             .gap_3()
             .child(header)
             .child(table_header)
             .child(body)
+            .when_some(self.expanded.clone(), |this, text| {
+                this.child(expanded_overlay(cx, text))
+            })
     }
+}
+
+/// A fixed-width cell that truncates with an ellipsis when content
+/// overflows. Double-click opens the full-text overlay so the user can
+/// read clipped content without resizing the column.
+fn cell(
+    cx: &mut Context<ConnectionsPage>,
+    id: (&'static str, usize),
+    width: Pixels,
+    text: String,
+) -> impl IntoElement {
+    let full = text.clone();
+    div()
+        .id(SharedString::from(format!("{}-{}", id.0, id.1)))
+        .w(width)
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .truncate()
+        .child(text)
+        .on_double_click(cx.listener(move |this, _e, _w, cx| {
+            this.expanded = Some(full.clone());
+            cx.notify();
+        }))
+}
+
+fn expanded_overlay(cx: &Context<ConnectionsPage>, text: String) -> impl IntoElement {
+    div()
+        .id("conn-expanded-overlay")
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(black().opacity(0.4))
+        // Click outside the card dismisses the overlay.
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _e, _w, cx| {
+                this.expanded = None;
+                cx.notify();
+            }),
+        )
+        .child(
+            div()
+                .id("conn-expanded-card")
+                .max_w(px(640.))
+                .max_h(px(420.))
+                .min_w(px(280.))
+                .p_4()
+                .bg(cx.theme().background)
+                .border_1()
+                .border_color(cx.theme().border)
+                .rounded_md()
+                .text_sm()
+                .overflow_y_scroll()
+                .child(text)
+                // Don't dismiss when the user clicks inside the card.
+                .on_mouse_down(MouseButton::Left, |_e, _w, cx| {
+                    cx.stop_propagation();
+                }),
+        )
 }
 
 async fn fetch_connections() -> anyhow::Result<ConnResponse> {

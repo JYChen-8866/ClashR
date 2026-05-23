@@ -1,8 +1,10 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::*;
+use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    ActiveTheme, StyledExt as _, VirtualListScrollHandle, h_flex, v_flex, v_virtual_list,
+    ActiveTheme, InteractiveElementExt as _, StyledExt as _, VirtualListScrollHandle, h_flex,
+    v_flex, v_virtual_list,
     button::{Button, ButtonVariants as _},
 };
 use serde::Deserialize;
@@ -32,6 +34,8 @@ pub struct RulesPage {
     loading: bool,
     error: Option<String>,
     scroll_handle: VirtualListScrollHandle,
+    /// Cell content shown in the full-text overlay; None when overlay is closed.
+    expanded: Option<String>,
 }
 
 impl RulesPage {
@@ -41,6 +45,7 @@ impl RulesPage {
             loading: true,
             error: None,
             scroll_handle: VirtualListScrollHandle::new(),
+            expanded: None,
         };
         me.refresh(cx);
         me
@@ -94,7 +99,7 @@ impl Render for RulesPage {
             .child(div().flex_1())
             .child(
                 Button::new("rules-refresh-btn")
-                    .label(t("proxies.refresh"))
+                    .label(t("rules.refresh"))
                     .compact()
                     .on_click(cx.listener(|this, _e, _w, cx| this.refresh(cx))),
             );
@@ -135,9 +140,13 @@ impl Render for RulesPage {
                 .child(err.clone())
                 .into_any_element()
         } else {
-            // Use virtual list for better performance with large rule sets
+            // Use virtual list for better performance with large rule sets.
+            // ROW_H must match the row's own .h(...) below — the virtual
+            // list positions rows by this size hint, so a too-small value
+            // here makes successive rows overlap.
+            const ROW_H: f32 = 32.;
             let item_count = self.rules.len();
-            let item_sizes = Rc::new(vec![size(px(100.), px(28.)); item_count]);
+            let item_sizes = Rc::new(vec![size(px(100.), px(ROW_H)); item_count]);
 
             let entity = cx.entity().clone();
             v_virtual_list(
@@ -148,11 +157,17 @@ impl Render for RulesPage {
                     range
                         .map(|i| {
                             let r = &this.rules[i];
+                            let payload = r.payload.clone();
+                            let proxy = r.proxy.clone();
+                            let rule_type = r.rule_type.clone();
+
                             h_flex()
                                 .w_full()
+                                .h(px(ROW_H))
+                                .flex_shrink_0()
                                 .px_3()
-                                .py_1p5()
                                 .gap_2()
+                                .items_center()
                                 .text_xs()
                                 .border_b_1()
                                 .border_color(cx.theme().border.opacity(0.5))
@@ -162,19 +177,9 @@ impl Render for RulesPage {
                                         .text_color(cx.theme().muted_foreground)
                                         .child(r.index.to_string()),
                                 )
-                                .child(div().w(px(140.)).child(r.rule_type.clone()))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .overflow_x_hidden()
-                                        .child(r.payload.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(180.))
-                                        .overflow_x_hidden()
-                                        .child(r.proxy.clone()),
-                                )
+                                .child(fixed_cell(cx, ("rules-type", i), px(140.), rule_type))
+                                .child(flex_cell(cx, ("rules-payload", i), payload))
+                                .child(fixed_cell(cx, ("rules-proxy", i), px(180.), proxy))
                         })
                         .collect()
                 },
@@ -185,11 +190,98 @@ impl Render for RulesPage {
 
         v_flex()
             .size_full()
+            .relative()
             .gap_3()
             .child(header)
             .child(table_header)
             .child(body)
+            .when_some(self.expanded.clone(), |this, text| {
+                this.child(expanded_overlay(cx, text))
+            })
     }
+}
+
+/// Fixed-width cell that truncates with ellipsis. Double-click opens the
+/// full-text overlay so the user can read clipped content without
+/// resizing the column.
+fn fixed_cell(
+    cx: &mut Context<RulesPage>,
+    id: (&'static str, usize),
+    width: Pixels,
+    text: String,
+) -> impl IntoElement {
+    let full = text.clone();
+    div()
+        .id(SharedString::from(format!("{}-{}", id.0, id.1)))
+        .w(width)
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .truncate()
+        .child(text)
+        .on_double_click(cx.listener(move |this, _e, _w, cx| {
+            this.expanded = Some(full.clone());
+            cx.notify();
+        }))
+}
+
+/// Flex-1 cell variant — same truncation behaviour but consumes
+/// remaining row width via the flex layout. `min_w_0` is required so
+/// the flex item can shrink below its content's intrinsic size and let
+/// `truncate` actually clip.
+fn flex_cell(
+    cx: &mut Context<RulesPage>,
+    id: (&'static str, usize),
+    text: String,
+) -> impl IntoElement {
+    let full = text.clone();
+    div()
+        .id(SharedString::from(format!("{}-{}", id.0, id.1)))
+        .flex_1()
+        .min_w_0()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .truncate()
+        .child(text)
+        .on_double_click(cx.listener(move |this, _e, _w, cx| {
+            this.expanded = Some(full.clone());
+            cx.notify();
+        }))
+}
+
+fn expanded_overlay(cx: &Context<RulesPage>, text: String) -> impl IntoElement {
+    div()
+        .id("rules-expanded-overlay")
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(black().opacity(0.4))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _e, _w, cx| {
+                this.expanded = None;
+                cx.notify();
+            }),
+        )
+        .child(
+            div()
+                .id("rules-expanded-card")
+                .max_w(px(640.))
+                .max_h(px(420.))
+                .min_w(px(280.))
+                .p_4()
+                .bg(cx.theme().background)
+                .border_1()
+                .border_color(cx.theme().border)
+                .rounded_md()
+                .text_sm()
+                .overflow_y_scroll()
+                .child(text)
+                .on_mouse_down(MouseButton::Left, |_e, _w, cx| {
+                    cx.stop_propagation();
+                }),
+        )
 }
 
 async fn fetch_rules() -> anyhow::Result<RulesResponse> {

@@ -177,6 +177,14 @@ impl Render for AppLayout {
             .cursor_pointer()
             .p_1()
             .rounded_md()
+            // `.occlude()` registers this hitbox as BlockMouse. gpui's
+            // hit test iterates topmost-first and stops at a BlockMouse
+            // hitbox, so the surrounding TitleBar's Drag hitbox is never
+            // recorded as hit. Without this, on Windows the OS treats
+            // the title-bar children container as a caption region and
+            // consumes the click for window-drag — our `on_click` would
+            // never fire. Mac/Linux are unaffected.
+            .occlude()
             .hover(|this| this.bg(cx.theme().muted))
             .child(
                 gpui_component::Icon::new(if self.sidebar_collapsed {
@@ -296,7 +304,10 @@ impl Render for AppLayout {
                             .border_color(cx.theme().sidebar_border),
                     )
                     .child(
-                        // Right segment — content-coloured
+                        // Right segment — content-coloured. The toggle
+                        // button uses `.occlude()` to escape the
+                        // TitleBar's `WindowControlArea::Drag` hitbox so
+                        // its click handler still fires on Windows.
                         h_flex()
                             .h_full()
                             .flex_1()
