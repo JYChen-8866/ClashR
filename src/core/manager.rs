@@ -182,7 +182,8 @@ impl CoreManager {
         // macOS TCC blocks root from reading ~/Downloads (and other
         // user-protected dirs). Copy runtime.yaml to a shared temp
         // location that the root-owned daemon can access.
-        let shared_dir = std::path::PathBuf::from("/tmp/clashr");
+        // On Windows there is no /tmp; use std::env::temp_dir() instead.
+        let shared_dir = std::env::temp_dir().join("clashr");
         std::fs::create_dir_all(&shared_dir)?;
         let shared_config = shared_dir.join("runtime.yaml");
 

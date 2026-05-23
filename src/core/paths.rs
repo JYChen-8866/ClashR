@@ -91,10 +91,11 @@ pub fn resources_dir() -> PathBuf {
 
 /// Where to look for the mihomo binary, in priority order.
 /// 1. MIHOMO_PATH env var
-/// 2. bin_dir() — user-managed directory (~/Library/.../ClashR/bin/ or <cwd>/bin/)
-/// 3. <exe-dir>/mihomo — bundled next to the main binary (Contents/MacOS/)
-/// 4. <exe-dir>/../Resources/bin/mihomo — alternative bundle layout
-/// 5. PATH
+/// 2. <exe-dir>/mihomo — bundled binary (Contents/MacOS/ in .app, or dev build dir)
+/// 3. <exe-dir>/../Resources/bin/mihomo — alternative bundle layout
+/// 4. <cwd>/bin/mihomo — in-tree dev location / user drop-in
+/// 5. bin_dir() — ~/Library/.../ClashR/bin/ when running as .app
+/// 6. PATH
 pub fn locate_mihomo() -> Option<PathBuf> {
     let bin_name = if cfg!(target_os = "windows") {
         "mihomo.exe"
@@ -109,12 +110,7 @@ pub fn locate_mihomo() -> Option<PathBuf> {
         }
     }
 
-    // User-managed bin directory (highest priority after env var)
-    let user_bin = bin_dir().join(bin_name);
-    if user_bin.is_file() {
-        return Some(user_bin);
-    }
-
+    // Bundled binary next to the executable
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = parent.join(bin_name);
@@ -126,6 +122,20 @@ pub fn locate_mihomo() -> Option<PathBuf> {
                 return Some(resources);
             }
         }
+    }
+
+    // <cwd>/bin/ — dev in-tree location
+    if let Ok(cwd) = std::env::current_dir() {
+        let p = cwd.join("bin").join(bin_name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    // User drop-in directory for .app installs
+    let user_bin = bin_dir().join(bin_name);
+    if user_bin.is_file() {
+        return Some(user_bin);
     }
 
     which(bin_name)
