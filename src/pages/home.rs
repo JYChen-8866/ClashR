@@ -394,6 +394,10 @@ impl HomePage {
                         });
                     }
                 });
+            } else {
+                // TUN toggle succeeded - keep the UI state as is
+                // The next poll will confirm the state from mihomo
+                info!(on, "TUN toggle completed successfully");
             }
         })
         .detach();
