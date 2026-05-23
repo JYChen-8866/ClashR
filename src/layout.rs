@@ -1,11 +1,11 @@
-use gpui::*;
 use gpui::prelude::FluentBuilder as _;
-use gpui_component::{
-    ActiveTheme, IconName, StyledExt as _, TitleBar, h_flex, v_flex, sidebar::*,
-};
+use gpui::*;
+use gpui_component::{h_flex, sidebar::*, v_flex, ActiveTheme, IconName, StyledExt as _, TitleBar};
 
 use crate::core::{CoreManager, CoreStatus};
-use crate::pages::{ConnectionsPage, HomePage, LogsPage, ProfilesPage, ProxiesPage, RulesPage, SettingsPage};
+use crate::pages::{
+    ConnectionsPage, HomePage, LogsPage, ProfilesPage, ProxiesPage, RulesPage, SettingsPage,
+};
 use crate::runtime::spawn_on_tokio;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,33 +81,32 @@ impl AppLayout {
         let settings_page = cx.new(|cx| SettingsPage::new(window, cx));
 
         // Poll core status periodically so the indicator stays in sync.
-        cx.spawn(async move |entity, cx| {
-            loop {
-                let status = spawn_on_tokio(async {
-                    CoreManager::global().status().await
-                }).await;
+        cx.spawn(async move |entity, cx| loop {
+            let status = spawn_on_tokio(async { CoreManager::global().status().await }).await;
 
-                let updated = cx.update(|cx| {
-                    if let Some(entity) = entity.upgrade() {
-                        entity.update(cx, |this: &mut AppLayout, cx| {
-                            if this.core_status != status {
-                                this.core_status = status;
-                                cx.notify();
-                            }
-                        });
-                        true
-                    } else {
-                        false
-                    }
-                });
-
-                if !updated {
-                    break;
+            let updated = cx.update(|cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |this: &mut AppLayout, cx| {
+                        if this.core_status != status {
+                            this.core_status = status;
+                            cx.notify();
+                        }
+                    });
+                    true
+                } else {
+                    false
                 }
+            });
 
-                cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+            if !updated {
+                break;
             }
-        }).detach();
+
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(800))
+                .await;
+        })
+        .detach();
 
         Self {
             current_page: Page::Home,
@@ -132,9 +131,13 @@ impl AppLayout {
         match &self.core_status {
             CoreStatus::Stopped => (crate::i18n::t("status.stopped"), hsla(0.0, 0.0, 0.6, 1.0)),
             CoreStatus::Starting => (crate::i18n::t("status.starting"), hsla(0.12, 0.7, 0.5, 1.0)),
-            CoreStatus::Running { .. } => (crate::i18n::t("status.running"), hsla(0.32, 0.6, 0.45, 1.0)),
+            CoreStatus::Running { .. } => {
+                (crate::i18n::t("status.running"), hsla(0.32, 0.6, 0.45, 1.0))
+            }
             CoreStatus::Stopping => (crate::i18n::t("status.stopping"), hsla(0.12, 0.7, 0.5, 1.0)),
-            CoreStatus::Failed { .. } => (crate::i18n::t("status.failed"), hsla(0.0, 0.7, 0.5, 1.0)),
+            CoreStatus::Failed { .. } => {
+                (crate::i18n::t("status.failed"), hsla(0.0, 0.7, 0.5, 1.0))
+            }
         }
     }
 }
@@ -176,8 +179,10 @@ impl Render for AppLayout {
                     .collapsible(SidebarCollapsible::Icon)
                     .collapsed(self.sidebar_collapsed)
                     .w(px(200.))
+                    .header(div().bg(gpui::yellow()).h(px(36.)))
+                    .pt(px(36.))
                     .header(
-                                SidebarHeader::new().child(
+                        SidebarHeader::new().child(
                             h_flex()
                                 .items_center()
                                 .gap_2()
@@ -263,17 +268,17 @@ impl Render for AppLayout {
                                     .rounded_md()
                                     .hover(|this| this.bg(cx.theme().muted))
                                     .child(
-                                        gpui_component::Icon::new(
-                                            if self.sidebar_collapsed {
-                                                IconName::PanelLeft
-                                            } else {
-                                                IconName::PanelLeftClose
-                                            }
-                                        )
+                                        gpui_component::Icon::new(if self.sidebar_collapsed {
+                                            IconName::PanelLeft
+                                        } else {
+                                            IconName::PanelLeftClose
+                                        })
                                         .size_4()
                                         .text_color(cx.theme().muted_foreground),
                                     )
-                                    .on_click(cx.listener(|this, _e, _w, cx| this.toggle_sidebar(cx))),
+                                    .on_click(
+                                        cx.listener(|this, _e, _w, cx| this.toggle_sidebar(cx)),
+                                    ),
                             ),
                     )
                     .child(
@@ -284,11 +289,17 @@ impl Render for AppLayout {
                             .p_4()
                             .overflow_hidden()
                             .child(match current {
-                                Page::Profiles => div().size_full().child(self.profiles_page.clone()),
+                                Page::Profiles => {
+                                    div().size_full().child(self.profiles_page.clone())
+                                }
                                 Page::Proxies => div().size_full().child(self.proxies_page.clone()),
-                                Page::Settings => div().size_full().child(self.settings_page.clone()),
+                                Page::Settings => {
+                                    div().size_full().child(self.settings_page.clone())
+                                }
                                 Page::Home => div().size_full().child(self.home_page.clone()),
-                                Page::Connections => div().size_full().child(self.connections_page.clone()),
+                                Page::Connections => {
+                                    div().size_full().child(self.connections_page.clone())
+                                }
                                 Page::Rules => div().size_full().child(self.rules_page.clone()),
                                 Page::Logs => div().size_full().child(self.logs_page.clone()),
                             }),
@@ -296,4 +307,3 @@ impl Render for AppLayout {
             )
     }
 }
-

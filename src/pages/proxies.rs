@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -18,18 +18,6 @@ use crate::services::mihomo_api::{self, ProxyNode};
 /// Theme-driven brand color (was: hard-coded `#7F60D3`).
 fn brand_color(cx: &App) -> Hsla {
     cx.theme().primary
-}
-
-/// Themed primary-button variant: theme `primary` background, theme
-/// `primary_foreground` text, with hover/active a touch darker.
-fn primary_button_variant(cx: &App) -> gpui_component::button::ButtonCustomVariant {
-    use gpui_component::button::ButtonCustomVariant;
-    let primary = cx.theme().primary;
-    ButtonCustomVariant::new(cx)
-        .color(primary)
-        .foreground(cx.theme().primary_foreground)
-        .hover(Hsla { l: (primary.l - 0.08).max(0.0), ..primary })
-        .active(Hsla { l: (primary.l - 0.15).max(0.0), ..primary })
 }
 
 /// Pick a representative icon for a proxy group's policy.
@@ -248,22 +236,39 @@ fn string_to_static(s: &str) -> &'static str {
 pub struct ProxiesPage {
     groups: Vec<ProxyNode>,
     all_proxies: HashMap<String, ProxyNode>,
-    selected_group: Option<String>,
+    expanded_groups: HashSet<String>,
     loading: bool,
     /// Set of group names currently being tested.
-    testing_groups: std::collections::HashSet<String>,
+    testing_groups: HashSet<String>,
     scroll_handle: VirtualListScrollHandle,
+    /// Latest viewport width — drives card-grid column count.
+    viewport_width: Pixels,
+    _bounds_subscription: Option<gpui::Subscription>,
 }
 
 impl ProxiesPage {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let viewport_width = window.viewport_size().width;
+
+        // Re-render whenever the window resizes so the card grid can
+        // recompute its column count.
+        let bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
+            let w = window.viewport_size().width;
+            if this.viewport_width != w {
+                this.viewport_width = w;
+                cx.notify();
+            }
+        });
+
         let mut page = Self {
             groups: Vec::new(),
             all_proxies: HashMap::new(),
-            selected_group: None,
+            expanded_groups: HashSet::new(),
             loading: false,
-            testing_groups: std::collections::HashSet::new(),
+            testing_groups: HashSet::new(),
             scroll_handle: VirtualListScrollHandle::new(),
+            viewport_width,
+            _bounds_subscription: Some(bounds_subscription),
         };
         page.refresh(cx);
         page
@@ -290,8 +295,13 @@ impl ProxiesPage {
                                     .collect();
                                 groups.sort_by(|a, b| a.name.cmp(&b.name));
                                 this.groups = groups;
-                                if this.selected_group.is_none() {
-                                    this.selected_group = this.groups.first().map(|g| g.name.clone());
+                                // First load: open the first group so the user
+                                // immediately sees content instead of an
+                                // entirely collapsed list.
+                                if this.expanded_groups.is_empty() {
+                                    if let Some(first) = this.groups.first() {
+                                        this.expanded_groups.insert(first.name.clone());
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -303,6 +313,13 @@ impl ProxiesPage {
                 }
             });
         }).detach();
+    }
+
+    fn toggle_group(&mut self, group: String, cx: &mut Context<Self>) {
+        if !self.expanded_groups.remove(&group) {
+            self.expanded_groups.insert(group);
+        }
+        cx.notify();
     }
 
     fn select_node(&mut self, group: String, node: String, cx: &mut Context<Self>) {
@@ -439,98 +456,100 @@ impl ProxiesPage {
             .into_any_element()
     }
 
-    fn render_group_item(
+    fn render_group_header(
         &self,
         group: &ProxyNode,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let is_selected = self.selected_group.as_deref() == Some(&group.name);
+        let is_expanded = self.expanded_groups.contains(&group.name);
         let name = group.name.clone();
         let kind = group.kind.clone();
         let now = group.now.clone().unwrap_or_default();
+        let count = group.all.len();
 
-        let bg = if is_selected {
-            brand_color(cx).opacity(0.1)
-        } else {
-            cx.theme().transparent
-        };
-        let border = if is_selected {
-            brand_color(cx)
-        } else {
-            cx.theme().transparent
-        };
-
-        v_flex()
-            .id(SharedString::from(format!("group-{}", name)))
+        h_flex()
+            .id(SharedString::from(format!("group-header-{}", name)))
+            .w_full()
             .px_3()
-            .py_2()
-            .gap_0p5()
+            .py_2p5()
+            .gap_2()
+            .items_center()
             .rounded_md()
-            .border_l_2()
-            .border_color(border)
-            .bg(bg)
             .cursor_pointer()
-            .when(!is_selected, |el| {
-                el.hover(|s| s.bg(cx.theme().muted.opacity(0.3)))
-            })
+            .hover(|s| s.bg(cx.theme().muted.opacity(0.4)))
             .on_click(cx.listener({
                 let name = name.clone();
                 move |this, _ev, _w, cx| {
-                    this.selected_group = Some(name.clone());
-                    cx.notify();
+                    this.toggle_group(name.clone(), cx);
                 }
             }))
             .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(Self::render_icon(
-                        &group.name,
-                        icon_for_group(&group.kind),
-                        if is_selected {
-                            brand_color(cx)
-                        } else {
-                            cx.theme().muted_foreground
-                        },
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_sm()
-                            .font_weight(if is_selected {
-                                FontWeight::SEMIBOLD
-                            } else {
-                                FontWeight::NORMAL
-                            })
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .child(group.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_sm()
-                            .bg(cx.theme().muted)
-                            .text_color(cx.theme().muted_foreground)
-                            .flex_shrink_0()
-                            .child(kind),
-                    ),
+                Icon::new(if is_expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
+                .size(px(14.))
+                .text_color(cx.theme().muted_foreground),
+            )
+            .child(Self::render_icon(
+                &group.name,
+                icon_for_group(&group.kind),
+                cx.theme().muted_foreground,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(name.clone()),
             )
             .child(
                 div()
-                    .pl_5()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .overflow_hidden()
                     .whitespace_nowrap()
+                    .max_w(px(180.))
                     .child(now),
             )
+            .child(
+                div()
+                    .text_xs()
+                    .px_1p5()
+                    .py_0p5()
+                    .rounded_sm()
+                    .bg(cx.theme().muted)
+                    .text_color(cx.theme().muted_foreground)
+                    .flex_shrink_0()
+                    .child(format!("{} • {}", kind, count)),
+            )
+            .child({
+                let group_for_test = name.clone();
+                let is_testing = self.testing_groups.contains(&name);
+                Button::new(SharedString::from(format!("test-{}", name)))
+                    .icon(IconName::Loader)
+                    .label(if is_testing {
+                        crate::i18n::t("proxies.testing")
+                    } else {
+                        crate::i18n::t("proxies.test")
+                    })
+                    .compact()
+                    .primary()
+                    .loading(is_testing)
+                    .on_click(cx.listener(move |this, ev, _w, cx| {
+                        // Don't toggle the group when clicking the inline Test button.
+                        cx.stop_propagation();
+                        let _ = ev;
+                        this.delay_test_group(group_for_test.clone(), cx);
+                    }))
+            })
     }
 
-    fn render_node_item(
+    fn render_node_card(
         &self,
         group: &str,
         node_name: &str,
@@ -545,29 +564,34 @@ impl ProxiesPage {
             .unwrap_or_else(|| "?".to_string());
         let delay = node.as_ref().and_then(|n| n.last_delay());
 
-        let bg_color = if is_current {
-            brand_color(cx).opacity(0.1)
+        let bg = if is_current {
+            brand_color(cx).opacity(0.12)
         } else {
-            cx.theme().transparent
+            cx.theme().muted.opacity(0.2)
+        };
+        let border = if is_current {
+            brand_color(cx)
+        } else {
+            cx.theme().border
         };
 
         let group_owned = group.to_string();
         let node_owned = node_name.to_string();
 
-        h_flex()
+        v_flex()
             .id(SharedString::from(format!("node-{}-{}", group, node_name)))
-            .w_full()
+            .h(px(NODE_CARD_HEIGHT))
             .px_3()
             .py_2()
-            .gap_3()
-            .items_center()
-            .bg(bg_color)
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.5))
+            .gap_1()
+            .rounded_md()
+            .border_1()
+            .border_color(border)
+            .bg(bg)
             .when(is_selectable, |el| {
                 el.cursor_pointer()
                     .when(!is_current, |el| {
-                        el.hover(|s| s.bg(cx.theme().muted.opacity(0.3)))
+                        el.hover(|s| s.bg(cx.theme().muted.opacity(0.4)))
                     })
                     .on_click(cx.listener(move |this, _ev, _w, cx| {
                         this.select_node(group_owned.clone(), node_owned.clone(), cx);
@@ -575,8 +599,7 @@ impl ProxiesPage {
             })
             .child(
                 h_flex()
-                    .flex_1()
-                    .min_w_0()
+                    .w_full()
                     .gap_2()
                     .items_center()
                     .child(Self::render_icon(
@@ -609,90 +632,83 @@ impl ProxiesPage {
                     ),
             )
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .flex_shrink_0()
-                    .w(px(80.))
-                    .child(kind),
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(kind),
+                    )
+                    .child({
+                        let (label, color) = match delay {
+                            Some(d) if d == 0 => ("—".to_string(), Self::delay_color(0, cx)),
+                            Some(d) => (format!("{} ms", d), Self::delay_color(d, cx)),
+                            None => (String::new(), cx.theme().muted_foreground),
+                        };
+                        div()
+                            .text_xs()
+                            .text_color(color)
+                            .flex_shrink_0()
+                            .child(label)
+                    }),
             )
-            .when_some(delay, |el, d| {
-                let label = if d == 0 {
-                    "—".to_string()
-                } else {
-                    format!("{} ms", d)
-                };
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(Self::delay_color(d, cx))
-                        .flex_shrink_0()
-                        .w(px(60.))
-                        .text_right()
-                        .child(label),
-                )
-            })
     }
+}
+
+/// Row in the flattened virtual-list model. Group headers and rows of
+/// node cards share one scrolling list. Each `NodeCardRow` packs up to
+/// `cols_per_row` cards horizontally; toggling a group just re-flattens.
+#[derive(Clone, Copy)]
+enum Row {
+    GroupHeader { group_idx: usize },
+    NodeCardRow {
+        group_idx: usize,
+        /// First node index packed into this row.
+        start: usize,
+        /// Card count in this row (≤ cols_per_row; tail rows can be shorter).
+        count: usize,
+    },
+}
+
+const GROUP_HEADER_HEIGHT: f32 = 52.;
+/// Height of a single node card; used both for fixed virtual-list row
+/// height and the card itself so they line up.
+const NODE_CARD_HEIGHT: f32 = 56.;
+/// Vertical space occupied by one card row (card + bottom gap).
+const NODE_CARD_ROW_HEIGHT: f32 = NODE_CARD_HEIGHT + 8.;
+/// Target card width — column count is computed from viewport.
+const NODE_CARD_TARGET_WIDTH: f32 = 220.;
+/// Horizontal padding inside the scrolling area.
+const GRID_HORIZONTAL_PADDING: f32 = 12.;
+/// Gap between adjacent cards in a row.
+const NODE_CARD_GAP: f32 = 8.;
+
+fn columns_per_row(viewport_width: Pixels) -> usize {
+    let w = f32::from(viewport_width);
+    let usable = (w - GRID_HORIZONTAL_PADDING * 2.0).max(NODE_CARD_TARGET_WIDTH);
+    // Solve: n cards + (n-1) gaps ≤ usable → n ≤ (usable + gap) / (card + gap)
+    let n = ((usable + NODE_CARD_GAP) / (NODE_CARD_TARGET_WIDTH + NODE_CARD_GAP)).floor() as usize;
+    n.max(1)
 }
 
 impl Render for ProxiesPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Prepare top-bar Test button state from the currently selected group.
-        let selected_for_test: Option<(SharedString, bool)> = self
-            .selected_group
-            .as_ref()
-            .and_then(|name| self.groups.iter().find(|g| &g.name == name))
-            .map(|g| {
-                (
-                    SharedString::from(g.name.clone()),
-                    self.testing_groups.contains(&g.name),
-                )
-            });
-
         let header = h_flex()
-            .justify_between()
             .items_center()
             .flex_shrink_0()
-            .child(div().font_bold().text_lg().child("Proxies"))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .when_some(selected_for_test, |row, (group_name, is_testing)| {
-                        let group_for_test = group_name.to_string();
-                        row.child(
-                            Button::new(SharedString::from(format!("test-{}", group_name)))
-                                .icon(IconName::Loader)
-                                .label(if is_testing { "Testing…" } else { "Test" })
-                                .compact()
-                                .custom(primary_button_variant(cx))
-                                .loading(is_testing)
-                                .on_click(cx.listener(move |this, _ev, _w, cx| {
-                                    this.delay_test_group(group_for_test.clone(), cx);
-                                })),
-                        )
-                    })
-                    .child(
-                        Button::new("refresh-proxies")
-                            .icon(IconName::Redo)
-                            .label("Refresh")
-                            .compact()
-                            .custom(primary_button_variant(cx))
-                            .on_click(cx.listener(|this, _ev, _w, cx| this.refresh(cx))),
-                    ),
-            );
+            .child(div().font_bold().text_lg().child(crate::i18n::t("nav.proxies")));
 
         if self.groups.is_empty() {
             return v_flex()
                 .size_full()
                 .gap_4()
                 .child(header)
-                .child(
-                    div()
-                        .h(px(1.))
-                        .w_full()
-                        .bg(cx.theme().border),
-                )
                 .child(
                     v_flex()
                         .flex_1()
@@ -704,9 +720,9 @@ impl Render for ProxiesPage {
                                 .text_color(cx.theme().muted_foreground)
                                 .text_base()
                                 .child(if self.loading {
-                                    "Loading..."
+                                    crate::i18n::t("proxies.loading")
                                 } else {
-                                    "No proxy groups"
+                                    crate::i18n::t("proxies.empty")
                                 }),
                         )
                         .child(
@@ -714,126 +730,98 @@ impl Render for ProxiesPage {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(
-                                    "Make sure the core is running and a profile is active.",
+                                    crate::i18n::t("proxies.empty_hint"),
                                 ),
                         ),
                 );
         }
 
-        let selected_group_name = self.selected_group.clone();
-        let selected_group: Option<ProxyNode> = selected_group_name
-            .as_deref()
-            .and_then(|n| self.groups.iter().find(|g| g.name == n))
-            .cloned();
+        // Compute current grid column count from the latest viewport width.
+        // We subtract a generous chunk to account for the sidebar etc; the
+        // window observer keeps `viewport_width` up-to-date and the math
+        // self-corrects on the next paint.
+        let cols = columns_per_row(self.viewport_width);
 
-        let groups_panel = v_flex()
-            .id("groups-list")
-            .w(px(220.))
-            .flex_shrink_0()
-            .h_full()
-            .gap_1()
-            .pr_2()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .overflow_y_scroll()
-            .children(self.groups.iter().map(|g| self.render_group_item(g, cx)));
+        // Flatten groups + their (optionally visible) card rows.
+        let mut rows: Vec<Row> = Vec::with_capacity(self.groups.len());
+        let mut sizes: Vec<Size<Pixels>> = Vec::with_capacity(self.groups.len());
+        for (gi, group) in self.groups.iter().enumerate() {
+            rows.push(Row::GroupHeader { group_idx: gi });
+            sizes.push(size(px(100.), px(GROUP_HEADER_HEIGHT)));
+            if self.expanded_groups.contains(&group.name) {
+                let total = group.all.len();
+                let mut start = 0;
+                while start < total {
+                    let count = (total - start).min(cols);
+                    rows.push(Row::NodeCardRow {
+                        group_idx: gi,
+                        start,
+                        count,
+                    });
+                    sizes.push(size(px(100.), px(NODE_CARD_ROW_HEIGHT)));
+                    start += count;
+                }
+            }
+        }
 
-        let nodes_panel: AnyElement = if let Some(group) = selected_group {
-            let group_name = group.name.clone();
-            let current = group.now.clone();
-            let is_selectable = group.is_user_selectable();
+        let rows = Rc::new(rows);
+        let item_sizes = Rc::new(sizes);
 
-            let header_row = h_flex()
-                .w_full()
-                .justify_between()
-                .items_center()
-                .pb_2()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(group_name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(format!(
-                                    "{} • {} nodes",
-                                    group.kind,
-                                    group.all.len()
-                                )),
-                        ),
-                )
-                .when(!is_selectable, |el| {
-                    el.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("auto-selected"),
-                    )
-                });
-
-            let group_for_cards = group_name.clone();
-            let nodes = group.all.clone();
-            let item_count = nodes.len();
-            let item_sizes = Rc::new(vec![size(px(100.), px(36.)); item_count]);
-
-            let entity = cx.entity().clone();
-            let nodes_list = v_virtual_list(
-                entity,
-                "proxies-virtual-list",
-                item_sizes,
-                move |this, range, _window, cx| {
-                    let group = this
-                        .groups
-                        .iter()
-                        .find(|g| g.name == group_for_cards)
-                        .cloned();
-                    if let Some(g) = group {
-                        let current = g.now.clone();
-                        let is_selectable = g.is_user_selectable();
-                        range
-                            .map(|i| {
-                                let name = &g.all[i];
-                                let is_current = current.as_deref() == Some(name.as_str());
-                                this.render_node_item(
-                                    &group_for_cards,
-                                    name,
-                                    is_current,
-                                    is_selectable,
-                                    cx,
-                                )
-                            })
-                            .collect()
-                    } else {
-                        vec![]
-                    }
-                },
-            )
-            .track_scroll(&self.scroll_handle);
-
-            v_flex()
-                .flex_1()
-                .h_full()
-                .min_w_0()
-                .pl_4()
-                .gap_2()
-                .child(header_row)
-                .child(nodes_list)
-                .into_any_element()
-        } else {
-            div()
-                .flex_1()
-                .pl_4()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child("Select a group on the left.")
-                .into_any_element()
-        };
+        let entity = cx.entity().clone();
+        let rows_for_closure = rows.clone();
+        let virtual_list = v_virtual_list(
+            entity,
+            "proxies-virtual-list",
+            item_sizes,
+            move |this, range, _window, cx| {
+                range
+                    .map(|i| match rows_for_closure[i] {
+                        Row::GroupHeader { group_idx } => {
+                            let group = this.groups[group_idx].clone();
+                            this.render_group_header(&group, cx).into_any_element()
+                        }
+                        Row::NodeCardRow { group_idx, start, count } => {
+                            let group = &this.groups[group_idx];
+                            let group_name = group.name.clone();
+                            let is_selectable = group.is_user_selectable();
+                            let current = group.now.clone();
+                            let mut row = h_flex()
+                                .w_full()
+                                .px(px(GRID_HORIZONTAL_PADDING))
+                                .py(px(NODE_CARD_GAP / 2.0))
+                                .gap(px(NODE_CARD_GAP))
+                                .items_stretch();
+                            for offset in 0..count {
+                                let node_name = group.all[start + offset].clone();
+                                let is_current = current.as_deref() == Some(node_name.as_str());
+                                let card = this
+                                    .render_node_card(
+                                        &group_name,
+                                        &node_name,
+                                        is_current,
+                                        is_selectable,
+                                        cx,
+                                    )
+                                    .into_any_element();
+                                row = row.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(card),
+                                );
+                            }
+                            // Pad remaining columns so cards in the last row
+                            // keep the same width as fully-packed rows.
+                            for _ in count..cols {
+                                row = row.child(div().flex_1().min_w_0());
+                            }
+                            row.into_any_element()
+                        }
+                    })
+                    .collect()
+            },
+        )
+        .track_scroll(&self.scroll_handle);
 
         v_flex()
             .size_full()
@@ -841,16 +829,9 @@ impl Render for ProxiesPage {
             .child(header)
             .child(
                 div()
-                    .h(px(1.))
-                    .w_full()
-                    .bg(cx.theme().border),
-            )
-            .child(
-                h_flex()
                     .flex_1()
                     .min_h_0()
-                    .child(groups_panel)
-                    .child(nodes_panel),
+                    .child(virtual_list),
             )
     }
 }

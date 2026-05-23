@@ -66,7 +66,10 @@ static EN: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("home.global_node", "GLOBAL Node");
     // Proxies
     m.insert("proxies.test", "Test");
-    m.insert("proxies.refresh", "Refresh");
+    m.insert("proxies.testing", "Testing…");
+    m.insert("proxies.loading", "Loading…");
+    m.insert("proxies.empty", "No proxy groups");
+    m.insert("proxies.empty_hint", "Make sure the core is running and a profile is active.");
     // Settings
     m.insert("settings.title", "Settings");
     m.insert("settings.appearance", "Appearance");
@@ -143,7 +146,10 @@ static ZH: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("home.collecting", "正在收集流量数据…");
     m.insert("home.global_node", "GLOBAL 节点");
     m.insert("proxies.test", "测速");
-    m.insert("proxies.refresh", "刷新");
+    m.insert("proxies.testing", "测速中…");
+    m.insert("proxies.loading", "加载中…");
+    m.insert("proxies.empty", "暂无代理分组");
+    m.insert("proxies.empty_hint", "请确认内核正在运行并已加载订阅。");
     m.insert("settings.title", "设置");
     m.insert("settings.appearance", "外观");
     m.insert("settings.theme", "主题");
