@@ -364,8 +364,9 @@ impl ProfilesPage {
 
     fn delete_profile(&mut self, uid: String, _window: &mut Window, cx: &mut Context<Self>) {
         info!(uid = %uid, "deleting profile");
+        let was_active = self.current_uid.as_deref() == Some(&uid);
         self.profiles.retain(|p| p.uid != uid);
-        if self.current_uid.as_deref() == Some(&uid) {
+        if was_active {
             self.current_uid = self.profiles.first().map(|p| p.uid.clone());
         }
         // Also remove the on-disk YAML.
@@ -373,6 +374,20 @@ impl ProfilesPage {
         let _ = std::fs::remove_file(&yaml_path);
         self.persist();
         cx.notify();
+
+        // If we deleted the active profile, activate the new current one
+        // so mihomo reloads with the correct config.
+        if was_active {
+            if let Some(new_uid) = self.current_uid.clone() {
+                cx.spawn(async move |_e, _cx| {
+                    let _ = crate::runtime::spawn_on_tokio(async move {
+                        let mgr = crate::core::CoreManager::global();
+                        let _ = mgr.activate_profile(&new_uid);
+                        let _ = mgr.restart().await;
+                    }).await;
+                }).detach();
+            }
+        }
     }
 
     fn update_profile(&mut self, uid: String, _window: &mut Window, cx: &mut Context<Self>) {
