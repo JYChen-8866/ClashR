@@ -31,6 +31,7 @@ chmod +x "$MACOS_DIR"/*
 
 echo "==> Copying resources..."
 cp -r "$PROJECT_ROOT/icons" "$RESOURCES_DIR/"
+cp -r "$PROJECT_ROOT/themes" "$RESOURCES_DIR/"
 
 echo "==> Creating app icon..."
 # Convert SVG to high-quality PNG at 1024x1024

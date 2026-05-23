@@ -22,7 +22,41 @@ pub fn data_dir() -> PathBuf {
             .join("data")
     };
     std::fs::create_dir_all(&dir).ok();
+
+    // One-time migration: if running as .app and profiles dir is empty,
+    // copy data from the dev/CLI location so existing users don't lose
+    // their subscriptions after installing the .app.
+    if is_app_bundle() {
+        let profiles = dir.join("profiles");
+        if !profiles.exists() || profiles.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
+            if let Ok(cwd) = std::env::current_dir() {
+                let old_profiles = cwd.join("data/profiles");
+                if old_profiles.exists() {
+                    let _ = copy_dir_all(&old_profiles, &profiles);
+                }
+                let old_runtime = cwd.join("data/runtime.yaml");
+                if old_runtime.exists() {
+                    let _ = std::fs::copy(&old_runtime, dir.join("runtime.yaml"));
+                }
+            }
+        }
+    }
+
     dir
+}
+
+fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Log directory.

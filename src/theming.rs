@@ -48,11 +48,10 @@ impl Preferences {
     }
 }
 
-/// Find the project's `themes/` directory (relative to cwd).
+/// Find the `themes/` directory — in a .app bundle it lives under
+/// Contents/Resources/; in dev it's relative to cwd.
 fn themes_dir() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("themes")
+    crate::core::paths::resources_dir().join("themes")
 }
 
 /// Scan `./themes/*.json` and register each with the theme registry.
