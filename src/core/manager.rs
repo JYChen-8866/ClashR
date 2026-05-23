@@ -95,12 +95,18 @@ impl CoreManager {
             set_if_missing(map, "log-level", serde_yaml::Value::String("info".into()));
             set_if_missing(map, "allow-lan", serde_yaml::Value::Bool(false));
 
-            // Default TUN block — disabled at start. The Home page's TUN
-            // toggle flips `enable` via mihomo's external controller, so
-            // these defaults define the *shape* of TUN (stack, DNS hijack,
-            // routing) for when it's switched on.
+            // Default TUN block — always disabled in config file. The Home
+            // page's TUN toggle flips `enable` via mihomo's external controller,
+            // so these defaults define the *shape* of TUN (stack, DNS hijack,
+            // routing) for when it's switched on. We keep it disabled in the
+            // config to avoid route conflicts on mihomo restart.
             let tun_key = serde_yaml::Value::String("tun".into());
-            if !map.contains_key(&tun_key) {
+            if let Some(serde_yaml::Value::Mapping(ref mut tun_map)) = map.get_mut(&tun_key) {
+                // If TUN config exists, force enable to false
+                let enable_key = serde_yaml::Value::String("enable".into());
+                tun_map.insert(enable_key, serde_yaml::Value::Bool(false));
+            } else {
+                // If TUN config doesn't exist, create it with enable: false
                 let mut tun = serde_yaml::Mapping::new();
                 tun.insert(serde_yaml::Value::String("enable".into()), serde_yaml::Value::Bool(false));
                 tun.insert(serde_yaml::Value::String("stack".into()), serde_yaml::Value::String("gvisor".into()));
