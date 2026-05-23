@@ -177,14 +177,28 @@ impl CoreManager {
         let shared_dir = std::path::PathBuf::from("/tmp/clashr");
         std::fs::create_dir_all(&shared_dir)?;
         let shared_config = shared_dir.join("runtime.yaml");
-        std::fs::copy(&config, &shared_config).map_err(|e| {
-            anyhow!(
-                "copy {} -> {}: {}",
-                config.display(),
-                shared_config.display(),
-                e
-            )
-        })?;
+
+        // Read the config, force tun.enable=false before handing to the
+        // daemon. TUN is enabled later via API so mihomo doesn't try to
+        // create routes that may already exist from a previous run.
+        let config_content = std::fs::read_to_string(&config)
+            .map_err(|e| anyhow!("read {}: {}", config.display(), e))?;
+        let shared_content = if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Value>(&config_content) {
+            if let serde_yaml::Value::Mapping(ref mut map) = doc {
+                let tun_key = serde_yaml::Value::String("tun".into());
+                if let Some(serde_yaml::Value::Mapping(ref mut tun_map)) = map.get_mut(&tun_key) {
+                    tun_map.insert(
+                        serde_yaml::Value::String("enable".into()),
+                        serde_yaml::Value::Bool(false),
+                    );
+                }
+            }
+            serde_yaml::to_string(&doc).unwrap_or(config_content)
+        } else {
+            config_content
+        };
+        std::fs::write(&shared_config, shared_content)
+            .map_err(|e| anyhow!("write {}: {}", shared_config.display(), e))?;
 
         // Also copy geodata (*.mmdb, *.dat, *.metadb) so mihomo doesn't
         // re-download them on every restart. These can be 5-10 MB each.
