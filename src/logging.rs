@@ -6,11 +6,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn log_dir() -> PathBuf {
-    // Project-relative directory: <cwd>/logs
-    // Falls back to ./logs if cwd is unavailable.
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("logs")
+    crate::core::paths::log_dir()
 }
 
 /// Initialize the global logger.

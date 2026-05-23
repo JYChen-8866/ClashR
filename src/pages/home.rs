@@ -1074,8 +1074,7 @@ fn icon_path_for(site: &SiteTest) -> Option<PathBuf> {
 }
 
 fn service_icon_path(stem: &str) -> Option<PathBuf> {
-    let p = std::env::current_dir()
-        .unwrap_or_default()
+    let p = crate::core::paths::resources_dir()
         .join("icons")
         .join(format!("{}.svg", stem));
     if p.exists() { Some(p) } else { None }
@@ -1089,8 +1088,7 @@ fn country_flag_path(iso2: &str) -> Option<PathBuf> {
     if code.len() != 2 {
         return None;
     }
-    let p = std::env::current_dir()
-        .unwrap_or_default()
+    let p = crate::core::paths::resources_dir()
         .join("icons/country")
         .join(format!("{}.svg", code.to_lowercase()));
     if p.exists() { Some(p) } else { None }
@@ -1582,7 +1580,7 @@ async fn put_global_node(name: &str) -> anyhow::Result<()> {
 }
 
 async fn patch_tun(enable: bool) -> anyhow::Result<()> {
-    // First, update the runtime.yaml file to persist the TUN state
+    // Persist TUN state to runtime.yaml
     let runtime_path = crate::core::paths::runtime_yaml_path();
     if let Ok(content) = std::fs::read_to_string(&runtime_path) {
         if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
@@ -1602,11 +1600,23 @@ async fn patch_tun(enable: bool) -> anyhow::Result<()> {
         }
     }
 
-    // Then, apply the change via mihomo API
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
         .build()?;
+
+    // When enabling TUN, first send disable to let mihomo clean up any
+    // stale routes from a previous run, then re-enable. Without this,
+    // mihomo tries to add routes that already exist → "file exists".
+    if enable {
+        let _ = client
+            .patch(format!("{}/configs", MIHOMO_BASE))
+            .json(&serde_json::json!({ "tun": { "enable": false } }))
+            .send()
+            .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
     let resp = client
         .patch(format!("{}/configs", MIHOMO_BASE))
         .json(&serde_json::json!({ "tun": { "enable": enable } }))

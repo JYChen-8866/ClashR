@@ -73,11 +73,15 @@ DMG_NAME="$APP_NAME-$VERSION-arm64.dmg"
 DMG_PATH="$PROJECT_ROOT/target/$DMG_NAME"
 rm -f "$DMG_PATH"
 
-# Create temporary DMG
+# Add Applications symlink so users can drag-install directly from the DMG
+ln -sf /Applications "$DMG_DIR/Applications"
+
+# Create compressed DMG
 hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_DIR" -ov -format UDZO "$DMG_PATH"
+
+# Clean up symlink
+rm -f "$DMG_DIR/Applications"
 
 echo "==> Done!"
 echo "    App bundle: $APP_DIR"
 echo "    DMG: $DMG_PATH"
-echo ""
-echo "To install: open $DMG_PATH and drag $APP_NAME.app to /Applications"
