@@ -252,7 +252,7 @@ impl ProfilesPage {
                                                         mgr.start().await?;
                                                     }
                                                     _ => {
-                                                        mgr.restart().await?;
+                                                        mgr.reload_config().await?;
                                                     }
                                                 }
                                                 anyhow::Ok(())
@@ -383,7 +383,7 @@ impl ProfilesPage {
                     let _ = crate::runtime::spawn_on_tokio(async move {
                         let mgr = crate::core::CoreManager::global();
                         let _ = mgr.activate_profile(&new_uid);
-                        let _ = mgr.restart().await;
+                        let _ = mgr.reload_config().await;
                     }).await;
                 }).detach();
             }
