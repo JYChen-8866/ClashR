@@ -8,6 +8,8 @@ use crate::pages::{
 };
 use crate::runtime::spawn_on_tokio;
 
+const REPO_URL: &str = "https://github.com/JYChen-8866/ClashR";
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Home,
@@ -397,7 +399,36 @@ impl Render for AppLayout {
                                         ),
                                 ),
                             )
-                            .child(SidebarMenu::new().children(menu_items)),
+                            .child(SidebarMenu::new().children(menu_items))
+                            .footer(
+                                SidebarFooter::new().child(
+                                    div()
+                                        .id("github-link")
+                                        .cursor_pointer()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .w_full()
+                                        .child(
+                                            gpui_component::Icon::new(IconName::Github)
+                                                .size(px(16.))
+                                                .text_color(cx.theme().muted_foreground),
+                                        )
+                                        .when(!self.sidebar_collapsed, |el| {
+                                            el.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("GitHub"),
+                                            )
+                                        })
+                                        .on_click(|_e, _w, _cx| {
+                                            let _ = std::process::Command::new("open")
+                                                .arg(REPO_URL)
+                                                .spawn();
+                                        }),
+                                ),
+                            ),
                     ),
             )
             .child(
