@@ -388,7 +388,7 @@ impl ProxiesPage {
     ///   100-300  → amber
     ///   300+     → orange
     ///   0 (fail) → red
-    fn delay_color(delay: u32, cx: &Context<Self>) -> Hsla {
+    fn delay_color(delay: u32, _cx: &Context<Self>) -> Hsla {
         if delay == 0 {
             hsla(0.0, 0.7, 0.5, 1.0) // red — request failed / timed out
         } else if delay < 100 {

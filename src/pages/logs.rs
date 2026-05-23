@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, StyledExt as _, h_flex, v_flex,
-    button::{Button, ButtonVariants as _},
+    button::Button,
 };
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};

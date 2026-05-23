@@ -1,5 +1,4 @@
 use gpui::*;
-use gpui::prelude::FluentBuilder as _;
 
 pub struct NavItem {
     label: SharedString,

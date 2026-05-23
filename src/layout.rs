@@ -1,6 +1,6 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_component::{h_flex, sidebar::*, v_flex, ActiveTheme, IconName, StyledExt as _, TitleBar};
+use gpui_component::{h_flex, sidebar::*, v_flex, ActiveTheme, IconName, TitleBar};
 
 use crate::core::{CoreManager, CoreStatus};
 use crate::pages::{

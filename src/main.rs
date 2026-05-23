@@ -72,7 +72,7 @@ fn main() {
     tracing::info!("ClashR starting");
 
     // Initialize system tray
-    let tray = match tray::SystemTray::new() {
+    let _tray = match tray::SystemTray::new() {
         Ok(t) => {
             tracing::info!("System tray initialized");
             Some(t)

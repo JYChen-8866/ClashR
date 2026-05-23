@@ -19,11 +19,10 @@ use std::time::{Duration, Instant};
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    ActiveTheme, IconName, StyledExt as _, h_flex, v_flex,
+    ActiveTheme, IconName, h_flex, v_flex,
     button::{Button, ButtonVariants as _},
     chart::AreaChart,
     popover::Popover,
-    switch::Switch,
 };
 use serde::Deserialize;
 use tracing::{info, warn};

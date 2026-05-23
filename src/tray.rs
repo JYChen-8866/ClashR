@@ -1,7 +1,6 @@
-use std::sync::{Arc, Mutex};
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem, MenuId},
-    TrayIcon, TrayIconBuilder, TrayIconEvent,
+    TrayIcon, TrayIconBuilder,
 };
 
 pub struct SystemTray {

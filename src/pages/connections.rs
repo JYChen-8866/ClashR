@@ -5,7 +5,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
     ActiveTheme, InteractiveElementExt as _, StyledExt as _, VirtualListScrollHandle, h_flex,
     v_flex, v_virtual_list,
-    button::{Button, ButtonVariants as _},
+    button::Button,
 };
 use serde::Deserialize;
 
