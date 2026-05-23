@@ -103,6 +103,15 @@ fn main() {
         gpui_component::init(cx);
         theming::load_bundled_themes(cx);
 
+        // Set Dock menu (macOS) / Jump List (Windows)
+        // Note: Actions require proper registration, so we use NoAction as placeholder
+        // The menu items will appear but won't trigger actions yet
+        cx.set_dock_menu(vec![
+            MenuItem::action("Show Window", NoAction),
+            MenuItem::separator(),
+            MenuItem::action("Quit ClashR", NoAction),
+        ]);
+
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(960.), px(680.)), cx)),
             titlebar: Some(gpui_component::TitleBar::title_bar_options()),
