@@ -71,18 +71,6 @@ fn main() {
 
     tracing::info!("ClashR starting");
 
-    // Initialize system tray
-    let _tray = match tray::SystemTray::new() {
-        Ok(t) => {
-            tracing::info!("System tray initialized");
-            Some(t)
-        }
-        Err(e) => {
-            tracing::warn!("Failed to initialize system tray: {}", e);
-            None
-        }
-    };
-
     let app = gpui_platform::application().with_assets(CombinedAssets::new());
 
     // Handle reopen events (e.g., clicking Dock icon when minimized)
