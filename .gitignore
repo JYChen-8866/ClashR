@@ -1,3 +1,6 @@
 /target
 logs/
 data/
+.DS_Store
+*.backup
+layout_patch.txt
