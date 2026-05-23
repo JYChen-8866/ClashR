@@ -336,10 +336,17 @@ impl CoreManager {
         drop(inner);
 
         let runtime_path = paths::runtime_yaml_path();
-        let abs_path = std::fs::canonicalize(&runtime_path)
+        let mut abs_path = std::fs::canonicalize(&runtime_path)
             .unwrap_or(runtime_path)
             .to_string_lossy()
             .to_string();
+
+        // On Windows, canonicalize() adds a \\?\ prefix for long paths.
+        // Strip it because mihomo's API doesn't recognize it.
+        #[cfg(windows)]
+        if abs_path.starts_with(r"\\?\") {
+            abs_path = abs_path[4..].to_string();
+        }
 
         info!(path = %abs_path, "reloading config via API");
 
