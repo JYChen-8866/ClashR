@@ -4,14 +4,15 @@
 //! (browsers, App Store, etc.) route through mihomo's mixed port. This is
 //! how the GFW circumvention actually happens for non-TUN setups.
 //!
-//! Currently only macOS is implemented (via `networksetup`). Windows and
-//! Linux are stubs that return `Err` so callers can surface the limitation.
+//! macOS uses `networksetup`. Windows writes to the per-user Internet
+//! Settings registry key and broadcasts a settings-change message so
+//! running WinINet clients pick up the change without a restart.
 
 use anyhow::Result;
 
 /// Bypass list applied alongside `enable`. Mirrors what most clash-style
 /// clients ship — keeps LAN/loopback traffic off the proxy.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const DEFAULT_BYPASS: &[&str] = &[
     "127.0.0.1",
     "192.168.0.0/16",
@@ -26,22 +27,22 @@ const DEFAULT_BYPASS: &[&str] = &[
 /// Turn the OS-level proxy on, pointing every active network service at
 /// `host:port` for HTTP, HTTPS, and SOCKS.
 pub fn enable(host: &str, port: u16) -> Result<()> {
-    macos::enable(host, port)
+    imp::enable(host, port)
 }
 
 /// Turn the OS-level proxy off on every active network service.
 pub fn disable() -> Result<()> {
-    macos::disable()
+    imp::disable()
 }
 
-/// Best-effort check: returns true if at least one active network service
-/// has HTTP proxy enabled and pointed at the given host/port.
+/// Best-effort check: returns true if the OS-level proxy is on and
+/// matches the supplied host/port.
 pub fn is_enabled(host: &str, port: u16) -> bool {
-    macos::is_enabled(host, port).unwrap_or(false)
+    imp::is_enabled(host, port).unwrap_or(false)
 }
 
 #[cfg(target_os = "macos")]
-mod macos {
+mod imp {
     use super::DEFAULT_BYPASS;
     use anyhow::{Context, Result, bail};
     use std::process::Command;
@@ -171,8 +172,123 @@ mod macos {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-mod macos {
+#[cfg(target_os = "windows")]
+mod imp {
+    //! Windows system proxy via the per-user Internet Settings registry
+    //! key. Affects WinINet/WinHTTP-aware apps (Edge, IE, Office, many
+    //! desktop apps); apps with their own proxy settings (e.g. Firefox)
+    //! are unaffected, which matches user expectations on Windows.
+
+    use super::DEFAULT_BYPASS;
+    use anyhow::{Context, Result};
+    use tracing::{info, warn};
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+
+    const SETTINGS_KEY: &str =
+        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+    fn open_settings(write: bool) -> Result<RegKey> {
+        let access = if write {
+            KEY_READ | KEY_SET_VALUE
+        } else {
+            KEY_READ
+        };
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(SETTINGS_KEY, access)
+            .with_context(|| format!(r"opening HKCU\{SETTINGS_KEY}"))
+    }
+
+    /// Tell WinINet to re-read settings so existing connections pick up
+    /// the new proxy without a restart. Best-effort: we ignore failures.
+    fn broadcast_change() {
+        use windows_sys::Win32::Networking::WinInet::{
+            INTERNET_OPTION_REFRESH, INTERNET_OPTION_SETTINGS_CHANGED, InternetSetOptionW,
+        };
+        // Safety: both calls accept a NULL handle and a NULL buffer; the
+        // OS interprets that as "broadcast to all WinINet sessions".
+        unsafe {
+            InternetSetOptionW(
+                std::ptr::null_mut(),
+                INTERNET_OPTION_SETTINGS_CHANGED,
+                std::ptr::null_mut(),
+                0,
+            );
+            InternetSetOptionW(
+                std::ptr::null_mut(),
+                INTERNET_OPTION_REFRESH,
+                std::ptr::null_mut(),
+                0,
+            );
+        }
+    }
+
+    pub fn enable(host: &str, port: u16) -> Result<()> {
+        let key = open_settings(true)?;
+        let server = format!("{host}:{port}");
+        // Windows uses ';' as the separator and `<local>` to bypass
+        // intranet hosts. Re-use the cross-platform list and append the
+        // sentinel if missing.
+        let mut bypass_parts: Vec<String> =
+            DEFAULT_BYPASS.iter().map(|s| (*s).to_string()).collect();
+        if !bypass_parts.iter().any(|p| p == "<local>") {
+            bypass_parts.push("<local>".into());
+        }
+        let bypass = bypass_parts.join(";");
+
+        key.set_value("ProxyEnable", &1u32)
+            .context("set ProxyEnable=1")?;
+        key.set_value("ProxyServer", &server)
+            .context("set ProxyServer")?;
+        key.set_value("ProxyOverride", &bypass)
+            .context("set ProxyOverride")?;
+
+        broadcast_change();
+        info!(%host, port, "system proxy enabled");
+        Ok(())
+    }
+
+    pub fn disable() -> Result<()> {
+        let key = open_settings(true)?;
+        key.set_value("ProxyEnable", &0u32)
+            .context("set ProxyEnable=0")?;
+        broadcast_change();
+        info!("system proxy disabled");
+        Ok(())
+    }
+
+    pub fn is_enabled(host: &str, port: u16) -> Result<bool> {
+        let key = match open_settings(false) {
+            Ok(k) => k,
+            Err(e) => {
+                warn!(error = %e, "open Internet Settings for read");
+                return Ok(false);
+            }
+        };
+        let on: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+        if on == 0 {
+            return Ok(false);
+        }
+        let server: String = key.get_value("ProxyServer").unwrap_or_default();
+        let want = format!("{host}:{port}");
+        // ProxyServer can be either "host:port" (one proxy for all) or
+        // "http=h:p;https=h:p;..." (per-protocol). We treat the latter
+        // as "matches if HTTP entry matches" since that's what we set.
+        let matches = if server.contains('=') {
+            server.split(';').any(|part| {
+                let part = part.trim();
+                part.eq_ignore_ascii_case(&format!("http={want}"))
+                    || part == want
+            })
+        } else {
+            server == want
+        };
+        Ok(matches)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+mod imp {
     use anyhow::{Result, bail};
 
     pub fn enable(_host: &str, _port: u16) -> Result<()> {

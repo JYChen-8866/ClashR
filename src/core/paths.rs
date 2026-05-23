@@ -29,13 +29,20 @@ pub fn runtime_yaml_path() -> PathBuf {
 /// Where to look for the mihomo binary, in priority order.
 ///
 /// 1. `MIHOMO_PATH` env var (override for testing)
-/// 2. `<exe-dir>/mihomo` — bundled next to the main app binary
-/// 3. `<exe-dir>/../Resources/bin/mihomo` — alternative .app layout
-/// 4. `<cwd>/bin/mihomo` — in-tree stable location, committed so the
-///    project is self-contained and runnable on a fresh checkout
-/// 5. `<cwd>/mihomo` — legacy fallback for older layouts
-/// 6. `mihomo` resolved from `PATH`
+/// 2. `<exe-dir>/mihomo[.exe]` — bundled next to the main app binary
+/// 3. `<exe-dir>/../Resources/bin/mihomo` — macOS .app layout
+/// 4. `<cwd>/bin/mihomo[.exe]` — in-tree stable location
+/// 5. `<cwd>/mihomo[.exe]` — legacy fallback
+/// 6. `mihomo[.exe]` resolved from `PATH`
 pub fn locate_mihomo() -> Option<PathBuf> {
+    // On Windows the binary is mihomo.exe; on every other platform it
+    // has no extension.
+    let bin_name = if cfg!(target_os = "windows") {
+        "mihomo.exe"
+    } else {
+        "mihomo"
+    };
+
     if let Ok(p) = std::env::var("MIHOMO_PATH") {
         let path = PathBuf::from(p);
         if path.is_file() {
@@ -45,11 +52,12 @@ pub fn locate_mihomo() -> Option<PathBuf> {
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            let candidate = parent.join("mihomo");
+            let candidate = parent.join(bin_name);
             if candidate.is_file() {
                 return Some(candidate);
             }
-            let resources = parent.join("..").join("Resources").join("bin").join("mihomo");
+            // macOS .app bundle layout: Contents/MacOS/../Resources/bin/
+            let resources = parent.join("..").join("Resources").join("bin").join(bin_name);
             if resources.is_file() {
                 return Some(resources);
             }
@@ -57,15 +65,18 @@ pub fn locate_mihomo() -> Option<PathBuf> {
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        for rel in ["bin/mihomo", "mihomo"] {
-            let p = cwd.join(rel);
+        for rel in [
+            format!("bin/{bin_name}"),
+            bin_name.to_string(),
+        ] {
+            let p = cwd.join(&rel);
             if p.is_file() {
                 return Some(p);
             }
         }
     }
 
-    which("mihomo")
+    which(bin_name)
 }
 
 fn which(cmd: &str) -> Option<PathBuf> {
