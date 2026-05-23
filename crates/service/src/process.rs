@@ -4,6 +4,7 @@
 
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -89,9 +90,26 @@ pub async fn stop(slot: &SharedCore) -> Result<()> {
     let mut guard = slot.lock().await;
     if let Some(mut child) = guard.child.take() {
         info!("stopping mihomo");
-        // SIGKILL via tokio's Child::kill — fast and unambiguous. mihomo
-        // is stateless (config is on disk) so there's no graceful-stop
-        // benefit worth the complexity.
+
+        // Send SIGTERM first so mihomo can clean up TUN interfaces and
+        // routes. SIGKILL bypasses cleanup and leaves stale routes that
+        // cause "file exists" errors on the next TUN enable.
+        #[cfg(unix)]
+        if let Some(pid) = child.id() {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            // Give mihomo up to 4 seconds to clean up TUN and exit.
+            match tokio::time::timeout(Duration::from_secs(4), child.wait()).await {
+                Ok(_) => {
+                    info!("mihomo exited cleanly after SIGTERM");
+                    return Ok(());
+                }
+                Err(_) => {
+                    warn!("mihomo did not exit after SIGTERM, sending SIGKILL");
+                }
+            }
+        }
+
+        // Fallback: force-kill if SIGTERM didn't work (or on non-Unix).
         let _ = child.kill().await;
         let _ = child.wait().await;
     }

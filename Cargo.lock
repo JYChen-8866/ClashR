@@ -901,6 +901,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clashr-ipc",
+ "libc",
  "once_cell",
  "serde",
  "serde_json",
