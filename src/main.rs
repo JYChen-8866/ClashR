@@ -16,6 +16,7 @@ mod runtime;
 mod services;
 mod theme;
 mod theming;
+mod tray;
 
 use gpui::*;
 use assets::CombinedAssets;

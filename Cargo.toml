@@ -38,6 +38,8 @@ tokio.workspace = true
 once_cell.workspace = true
 urlencoding = "2"
 mimalloc = { version = "0.1", default-features = false }
+tray-icon = "0.14"
+image = "0.25"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
