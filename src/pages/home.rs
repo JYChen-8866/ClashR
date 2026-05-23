@@ -475,6 +475,7 @@ impl Render for HomePage {
             .size_full()
             .gap_4()
             .overflow_y_scroll()
+            .child(div().text_xl().font_weight(FontWeight::BOLD).child(crate::i18n::t("nav.home").to_string()))
             .child(top_row)
             .child(self.traffic_section(cx))
             .child(self.sites_section(cx))
