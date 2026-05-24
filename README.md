@@ -1,4 +1,6 @@
 # ClashR
+<img width="1919" height="1078" alt="image" src="https://github.com/user-attachments/assets/d4fd8dfa-e850-4d06-99b6-424f9baec78c" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9487fff9-fc9f-460b-9aa8-ef97ec4b59c0" />
 
 A desktop GUI for [mihomo](https://github.com/MetaCubeX/mihomo) (Clash.Meta), built with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui).
 
